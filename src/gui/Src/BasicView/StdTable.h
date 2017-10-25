@@ -22,22 +22,34 @@ public:
 
     // Selection Management
     void expandSelectionUpTo(int to);
+    void expandUp();
+    void expandDown();
+    void expandTop();
+    void expandBottom();
     void setSingleSelection(int index);
     int getInitialSelection();
+    QList<int> getSelection();
+    void selectStart();
+    void selectEnd();
     void selectNext();
     void selectPrevious();
+    void selectAll();
     bool isSelected(int base, int offset);
+    bool scrollSelect(int offset);
 
     // Data Management
-    void addColumnAt(int width, QString title, bool isClickable, QString copyTitle = "");
+    void addColumnAt(int width, QString title, bool isClickable, QString copyTitle = "", SortBy::t sortFn = SortBy::AsText);
     void setRowCount(int count);
     void deleteAllColumns();
     void setCellContent(int r, int c, QString s);
     QString getCellContent(int r, int c);
+    void setCellUserdata(int r, int c, duint userdata);
+    duint getCellUserdata(int r, int c);
     bool isValidIndex(int r, int c);
 
     //context menu helpers
     void setupCopyMenu(QMenu* copyMenu);
+    void setupCopyMenu(MenuBuilder* copyMenu);
     void setCopyMenuOnly(bool bSet, bool bDebugOnly = true);
 
 signals:
@@ -50,25 +62,35 @@ public slots:
     void copyLineSlot();
     void copyTableSlot();
     void copyTableResizeSlot();
+    void copyLineToLogSlot();
+    void copyTableToLogSlot();
+    void copyTableResizeToLogSlot();
     void copyEntrySlot();
     void contextMenuRequestedSlot(const QPoint & pos);
     void headerButtonPressedSlot(int col);
 
-private:
-    void copyTable(std::function<int(int)> getMaxColSize);
+protected:
+    QString copyTable(const std::vector<int> & colWidths);
+
+    struct CellData
+    {
+        QString text;
+        duint userdata = 0;
+    };
 
     class ColumnCompare
     {
     public:
-        ColumnCompare(int col, bool greater)
+        ColumnCompare(int col, bool greater, SortBy::t fn)
         {
             mCol = col;
             mGreater = greater;
+            mSortFn = fn;
         }
 
-        inline bool operator()(const QList<QString> & a, const QList<QString> & b) const
+        inline bool operator()(const std::vector<CellData> & a, const std::vector<CellData> & b) const
         {
-            bool less = QString::compare(a.at(mCol), b.at(mCol), Qt::CaseInsensitive) < 0;
+            bool less = mSortFn(a.at(mCol).text, b.at(mCol).text);
             if(mGreater)
                 return !less;
             return less;
@@ -76,6 +98,7 @@ private:
     private:
         int mCol;
         int mGreater;
+        SortBy::t mSortFn;
     };
 
     enum GuiState_t {NoState, MultiRowsSelectionState};
@@ -91,13 +114,13 @@ private:
 
     SelectionData_t mSelection;
 
-    bool mIsMultiSelctionAllowed;
+    bool mIsMultiSelectionAllowed;
     bool mCopyMenuOnly;
     bool mCopyMenuDebugOnly;
     bool mIsColumnSortingAllowed;
 
-    QList<QList<QString>> mData;
-    QList<QString> mCopyTitles;
+    std::vector<std::vector<CellData>> mData; //listof(row) where row = (listof(col) where col = string)
+    std::vector<QString> mCopyTitles;
     QPair<int, bool> mSort;
 };
 

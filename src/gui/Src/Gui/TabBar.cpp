@@ -7,6 +7,7 @@
 #include <QPaintDevice>
 #include <QDrag>
 #include <QMimeData>
+#include <QMenu>
 
 #include "tabbar.h"
 #include "tabwidget.h"
@@ -19,9 +20,11 @@ MHTabBar::MHTabBar(QWidget* parent, bool allowDetach, bool allowDelete) : QTabBa
     mAllowDetach = allowDetach;
     mAllowDelete = allowDelete;
     setAcceptDrops(true);
-    setElideMode(Qt::ElideRight);
+    setElideMode(Qt::ElideNone);
     setSelectionBehaviorOnRemove(QTabBar::SelectLeftTab);
     setMovable(true);
+    setDrawBase(false);
+    setStyleSheet("QTabBar::tear { width: 0px; border: none; }");
 }
 
 //////////////////////////////////////////////////////////////
@@ -36,10 +39,10 @@ void MHTabBar::contextMenuEvent(QContextMenuEvent* event)
     if(!mAllowDetach && !mAllowDelete)
         return;
     QMenu wMenu(this);
-    QAction wDetach("&Detach", this);
+    QAction wDetach(tr("&Detach"), this);
     if(mAllowDetach)
         wMenu.addAction(&wDetach);
-    QAction wDelete("&Delete", this);
+    QAction wDelete(tr("&Delete"), this);
     if(mAllowDelete)
         wMenu.addAction(&wDelete);
     QAction* executed = wMenu.exec(event->globalPos());

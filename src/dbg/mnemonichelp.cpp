@@ -1,8 +1,6 @@
 #include "mnemonichelp.h"
 #include "threading.h"
-#include <algorithm>
-#include <string>
-#include <locale>
+#include "jansson/jansson_x64dbg.h"
 
 static std::unordered_map<String, String> MnemonicMap;
 static std::unordered_map<String, String> MnemonicBriefMap;
@@ -65,19 +63,19 @@ String MnemonicHelp::getUniversalMnemonic(const String & mnem)
     };
     if(mnemLower == "jmp")
         return mnemLower;
-    if(mnemLower == "loop")  //LOOP
+    if(mnemLower == "loop") //LOOP
         return mnemLower;
-    if(startsWith("int"))  //INT n
+    if(startsWith("int")) //INT n
         return "int n";
-    if(startsWith("cmov"))  //CMOVcc
+    if(startsWith("cmov")) //CMOVcc
         return "cmovcc";
-    if(startsWith("fcmov"))  //FCMOVcc
+    if(startsWith("fcmov")) //FCMOVcc
         return "fcmovcc";
-    if(startsWith("j"))  //Jcc
+    if(startsWith("j")) //Jcc
         return "jcc";
-    if(startsWith("loop"))  //LOOPcc
+    if(startsWith("loop")) //LOOPcc
         return "loopcc";
-    if(startsWith("set"))  //SETcc
+    if(startsWith("set")) //SETcc
         return "setcc";
     return mnemLower;
 }
@@ -85,15 +83,15 @@ String MnemonicHelp::getUniversalMnemonic(const String & mnem)
 String MnemonicHelp::getDescription(const char* mnem, int depth)
 {
     if(mnem == nullptr)
-        return "Invalid mnemonic!";
+        return GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Invalid mnemonic!"));
     if(depth == 10)
-        return "Too many redirections...";
+        return GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Too many redirections..."));
     SHARED_ACQUIRE(LockMnemonicHelp);
     auto mnemuni = getUniversalMnemonic(mnem);
     auto found = MnemonicMap.find(mnemuni);
     if(found == MnemonicMap.end())
     {
-        if(mnemuni[0] == 'v')  //v/vm
+        if(mnemuni[0] == 'v') //v/vm
         {
             found = MnemonicMap.find(mnemuni.c_str() + 1);
             if(found == MnemonicMap.end())
@@ -103,31 +101,28 @@ String MnemonicHelp::getDescription(const char* mnem, int depth)
             return "";
     }
     const auto & description = found->second;
-    if(StringUtils::StartsWith(description, "-R:"))  //redirect
-    {
-        SHARED_RELEASE();
+    if(StringUtils::StartsWith(description, "-R:")) //redirect
         return getDescription(description.c_str() + 3, depth + 1);
-    }
     return description;
 }
 
 String MnemonicHelp::getBriefDescription(const char* mnem)
 {
     if(mnem == nullptr)
-        return "Invalid mnemonic!";
+        return GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Invalid mnemonic!"));
     SHARED_ACQUIRE(LockMnemonicHelp);
     auto mnemLower = StringUtils::ToLower(mnem);
     if(mnemLower == "???")
-        return "invalid instruction";
+        return GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "invalid instruction"));
     auto found = MnemonicBriefMap.find(mnemLower);
     if(found == MnemonicBriefMap.end())
     {
-        if(mnemLower[0] == 'v')  //v/vm
+        if(mnemLower[0] == 'v') //v/vm
         {
             found = MnemonicBriefMap.find(mnemLower.c_str() + 1);
             if(found != MnemonicBriefMap.end())
             {
-                if(mnemLower.length() > 1 && mnemLower[1] == 'm')  //vm
+                if(mnemLower.length() > 1 && mnemLower[1] == 'm') //vm
                     return "vm " + found->second;
                 return "vector " + found->second;
             }

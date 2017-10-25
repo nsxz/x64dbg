@@ -2,7 +2,12 @@
 #define CPUSIDEBAR_H
 
 #include <QAbstractScrollArea>
-#include "CPUDisassembly.h"
+#include <QPen>
+#include "QBeaEngine.h"
+#include "CodeFolding.h"
+#include "Imports.h"
+
+class CPUDisassembly;
 
 class CPUSideBar : public QAbstractScrollArea
 {
@@ -16,9 +21,15 @@ public:
 
     QSize sizeHint() const;
     void drawStraightArrow(QPainter* painter, int x1, int y1, int x2, int y2);
+    void drawFoldingCheckbox(QPainter* painter, int y, bool state);
+
+    CodeFoldingHelper* getCodeFoldingManager();
 
     static void* operator new(size_t size);
     static void operator delete(void* p);
+
+signals:
+    void folded();
 
 public slots:
     // Configuration
@@ -27,22 +38,26 @@ public slots:
     void updateFonts();
 
     void debugStateChangedSlot(DBGSTATE state);
-    void repaint();
+    void reload();
     void changeTopmostAddress(dsint i);
     void setViewableRows(int rows);
     void setSelection(dsint selVA);
+    void foldDisassembly(duint startAddress, duint length);
 
 protected:
     void paintEvent(QPaintEvent* event);
     void mouseReleaseEvent(QMouseEvent* e);
     void mouseMoveEvent(QMouseEvent* event);
+    void mouseDoubleClickEvent(QMouseEvent* event);
 
-    void drawLabel(QPainter* painter, int Line, const QString & Text);
     void drawBullets(QPainter* painter, int line, bool ispb, bool isbpdisabled, bool isbookmark);
     bool isJump(int i) const;
     void drawJump(QPainter* painter, int startLine, int endLine, int jumpoffset, bool conditional, bool isexecute, bool isactive);
+    int isFoldingGraphicsPresent(int line);
+    CodeFoldingHelper mCodeFoldingManager;
 
 private:
+    CachedFontMetrics* mFontMetrics;
     dsint topVA;
     dsint selectedVA;
     QFont m_DefaultFont;
@@ -52,12 +67,30 @@ private:
     int mBulletYOffset = 10;
     const int mBulletXOffset = 10;
 
-
     CPUDisassembly* mDisas;
     QList<Instruction_t>* mInstrBuffer;
     REGDUMP regDump;
 
-private:
+    struct JumpLine
+    {
+        int line;
+        int destLine;
+        unsigned int jumpOffset;
+        bool isSelected;
+        bool isConditional;
+        bool isJumpGoingToExecute;
+    };
+    struct LabelArrow
+    {
+        int line;
+        int startX;
+        int endX;
+    };
+
+    void AllocateJumpOffsets(std::vector<JumpLine> & jumpLines, std::vector<LabelArrow> & labelArrows);
+    LabelArrow drawLabel(QPainter* painter, int Line, const QString & Text);
+    void drawLabelArrows(QPainter* painter, const std::vector<LabelArrow> & labelArrows);
+
     // Configuration
     QColor mBackgroundColor;
 
@@ -70,6 +103,9 @@ private:
     QColor mBulletBookmarkColor;
     QColor mBulletColor;
     QColor mBulletDisabledBreakpointColor;
+
+    QColor mChkBoxForeColor;
+    QColor mChkBoxBackColor;
 
     QColor mCipLabelColor;
     QColor mCipLabelBackgroundColor;

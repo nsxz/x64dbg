@@ -8,13 +8,19 @@
 ## Pre-defined global variables
 ##
 
+CONFIG(debug, debug|release) {
+    DIR_SUFFIX = d
+} else {
+    DIR_SUFFIX =
+}
+
 !contains(QMAKE_HOST.arch, x86_64) {
-    X64_BIN_DIR = ../../bin/x32      # Relative BIN path, 32-bit
-    X64_GEN_DIR = ../gui_build/out32 # QMake temporary generated files, placed inside the build folder. (OBJ, UI, MOC)
+    X64_BIN_DIR = ../../bin/x32$${DIR_SUFFIX}      # Relative BIN path, 32-bit
+    X64_GEN_DIR = ../gui_build/out32$${DIR_SUFFIX} # QMake temporary generated files, placed inside the build folder. (OBJ, UI, MOC)
     TARGET = x32gui                  # Build x32gui
 } else {
-    X64_BIN_DIR = ../../bin/x64      # Relative BIN path, 64-bit
-    X64_GEN_DIR = ../gui_build/out64 # QMake temporary generated files, placed inside the build folder. (OBJ, UI, MOC)
+    X64_BIN_DIR = ../../bin/x64$${DIR_SUFFIX}      # Relative BIN path, 64-bit
+    X64_GEN_DIR = ../gui_build/out64$${DIR_SUFFIX} # QMake temporary generated files, placed inside the build folder. (OBJ, UI, MOC)
     TARGET = x64gui                  # Build x64gui
 }
 
@@ -60,8 +66,10 @@ INCLUDEPATH += \
     Src/Global \
     Src/Utils \
     Src/ThirdPartyLibs/snowman \
-    Src/ThirdPartyLibs/float128 \
-    ../capstone_wrapper
+    Src/ThirdPartyLibs/ldconvert \
+    ../capstone_wrapper \
+    ../zydis_wrapper \
+    ../zydis_wrapper/zydis/include
 
 # Resources, sources, headers, and forms
 RESOURCES += \
@@ -76,14 +84,15 @@ SOURCES += \
     Src/BasicView/HexDump.cpp \
     Src/BasicView/AbstractTableView.cpp \
     Src/Disassembler/QBeaEngine.cpp \
+    Src/Disassembler/CsQBeaEngine.cpp \
     Src/Disassembler/capstone_gui.cpp \
+    Src/Disassembler/cs_capstone_gui.cpp \
     Src/Memory/MemoryPage.cpp \
     Src/Bridge/Bridge.cpp \
     Src/BasicView/StdTable.cpp \
     Src/Gui/MemoryMapView.cpp \
     Src/Gui/LogView.cpp \
     Src/Gui/GotoDialog.cpp \
-    Src/Gui/StatusLabel.cpp \
     Src/Gui/WordEditDialog.cpp \
     Src/Gui/CPUDisassembly.cpp \
     Src/Gui/LineEditDialog.cpp \
@@ -142,7 +151,6 @@ SOURCES += \
     Src/Gui/NotepadView.cpp \
     Src/Gui/CPUMultiDump.cpp \
     Src/Gui/AssembleDialog.cpp \
-    Src/ThirdPartyLibs/float128/float128.cpp \
     Src/Utils/StringUtil.cpp \
     Src/Gui/SEHChainView.cpp \
     Src/Gui/EditBreakpointDialog.cpp \
@@ -154,7 +162,32 @@ SOURCES += \
     Src/Utils/MiscUtil.cpp \
     Src/Gui/XrefBrowseDialog.cpp \
     Src/Gui/CodepageSelectionDialog.cpp \
-    Src/Gui/ColumnReorderDialog.cpp
+    Src/Gui/ColumnReorderDialog.cpp \
+    Src/Utils/EncodeMap.cpp \
+    Src/Utils/CodeFolding.cpp \
+    Src/Gui/WatchView.cpp \
+    Src/Gui/FavouriteTools.cpp \
+    Src/Gui/BrowseDialog.cpp \
+    Src/Gui/DisassemblerGraphView.cpp \
+    Src/Gui/DisassemblyPopup.cpp \
+    Src/Gui/VirtualModDialog.cpp \
+    Src/BasicView/LabeledSplitter.cpp \
+    Src/BasicView/LabeledSplitterDetachedWindow.cpp \
+    Src/Gui/LogStatusLabel.cpp \
+    Src/Gui/DebugStatusLabel.cpp \
+    Src/Utils/MenuBuilder.cpp \
+    Src/Gui/StructWidget.cpp \
+    Src/Gui/CustomizeMenuDialog.cpp \
+    Src/Gui/SimpleTraceDialog.cpp \
+    Src/Utils/MRUList.cpp \
+    Src/Gui/LocalVarsView.cpp \
+    Src/Gui/MessagesBreakpoints.cpp \
+    Src/Gui/AboutDialog.cpp \
+    Src/Gui/BreakpointMenu.cpp \
+    Src/Gui/ComboBoxDialog.cpp \
+    Src/Tracer/TraceBrowser.cpp \
+    Src/Tracer/TraceFileReader.cpp \
+    Src/Tracer/TraceFileSearch.cpp
 
 
 HEADERS += \
@@ -166,7 +199,9 @@ HEADERS += \
     Src/BasicView/HexDump.h \
     Src/BasicView/AbstractTableView.h \
     Src/Disassembler/QBeaEngine.h \
+    Src/Disassembler/CsQBeaEngine.h \
     Src/Disassembler/capstone_gui.h \
+    Src/Disassembler/cs_capstone_gui.h \
     Src/Memory/MemoryPage.h \
     Src/Bridge/Bridge.h \
     Src/Exports.h \
@@ -176,7 +211,6 @@ HEADERS += \
     Src/Gui/LogView.h \
     Src/Gui/GotoDialog.h \
     Src/Gui/RegistersView.h \
-    Src/Gui/StatusLabel.h \
     Src/Gui/WordEditDialog.h \
     Src/Gui/CPUDisassembly.h \
     Src/Gui/LineEditDialog.h \
@@ -235,10 +269,8 @@ HEADERS += \
     Src/Gui/NotesManager.h \
     Src/Gui/NotepadView.h \
     Src/Utils/MenuBuilder.h \
-    Src/Utils/QActionLambda.h \
     Src/Gui/CPUMultiDump.h \
     Src/Gui/AssembleDialog.h \
-    Src/ThirdPartyLibs/float128/float128.h \
     Src/Gui/SEHChainView.h \
     Src/Gui/EditBreakpointDialog.h \
     Src/Gui/CPUArgumentWidget.h \
@@ -250,7 +282,35 @@ HEADERS += \
     Src/Gui/XrefBrowseDialog.h \
     Src/Gui/CodepageSelectionDialog.h \
     Src/Utils/CachedFontMetrics.h \
-    Src/Gui/ColumnReorderDialog.h
+    Src/Gui/ColumnReorderDialog.h \
+    Src/Utils/EncodeMap.h \
+    Src/Utils/CodeFolding.h \
+    Src/Gui/WatchView.h \
+    Src/Gui/FavouriteTools.h \
+    Src/Gui/BrowseDialog.h \
+    Src/Gui/DisassemblerGraphView.h \
+    Src/Utils/ActionHelpers.h \
+    Src/Gui/DisassemblyPopup.h \
+    Src/Gui/VirtualModDialog.h \
+    Src/BasicView/LabeledSplitter.h \
+    Src/BasicView/LabeledSplitterDetachedWindow.h \
+    Src/Gui/LogStatusLabel.h \
+    Src/Gui/DebugStatusLabel.h \
+    Src/Gui/CustomizeMenuDialog.h \
+    Src/Gui/StructWidget.h \
+    Src/Gui/SimpleTraceDialog.h \
+    Src/Utils/MRUList.h \
+    Src/Gui/LocalVarsView.h \
+    Src/Gui/MessagesBreakpoints.h \
+    Src/Gui/AboutDialog.h \
+    Src/Gui/BreakpointMenu.h \
+    Src/Gui/ComboBoxDialog.h \
+    Src/Utils/VaHistory.h \
+    Src/Tracer/TraceBrowser.h \
+    Src/Tracer/TraceFileReader.h \
+    Src/Tracer/TraceFileReaderInternal.h \
+    Src/Tracer/TraceFileSearch.h
+    
 
 FORMS += \
     Src/Gui/MainWindow.ui \
@@ -282,27 +342,36 @@ FORMS += \
     Src/Gui/EditFloatRegister.ui \
     Src/Gui/XrefBrowseDialog.ui \
     Src/Gui/CodepageSelectionDialog.ui \
-    Src/Gui/ColumnReorderDialog.ui
-
-TRANSLATIONS = \
-    Translations/x64dbg.ts \
-    Translations/x64dbg_zh_CN.ts
+    Src/Gui/ColumnReorderDialog.ui \
+    Src/Gui/FavouriteTools.ui \
+    Src/Gui/BrowseDialog.ui \
+    Src/Gui/VirtualModDialog.ui \
+    Src/Gui/CustomizeMenuDialog.ui \
+    Src/Gui/StructWidget.ui \
+    Src/Gui/SimpleTraceDialog.ui \
+    Src/Gui/MessagesBreakpoints.ui \
+    Src/Gui/AboutDialog.ui \
+    Src/Gui/ComboBoxDialog.ui
 
 ##
 ## Libraries
 ##
-LIBS += -luser32
+LIBS += -luser32 -ladvapi32 -lwinmm -lshell32
 
 !contains(QMAKE_HOST.arch, x86_64) {
     # Windows x86 (32bit) specific build
+    LIBS += -L"$$PWD/../zydis_wrapper/bin/x32$${DIR_SUFFIX}" -lzydis_wrapper
     LIBS += -L"$$PWD/../capstone_wrapper/capstone" -lcapstone_x86
-    LIBS += -L"$$PWD/../capstone_wrapper/bin/x32" -lcapstone_wrapper
+    LIBS += -L"$$PWD/../capstone_wrapper/bin/x32$${DIR_SUFFIX}" -lcapstone_wrapper
     LIBS += -L"$$PWD/Src/ThirdPartyLibs/snowman" -lsnowman_x86
+    LIBS += -L"$$PWD/Src/ThirdPartyLibs/ldconvert" -lldconvert_x86
     LIBS += -L"$${X64_BIN_DIR}" -lx32bridge
 } else {
     # Windows x64 (64bit) specific build
+    LIBS += -L"$$PWD/../zydis_wrapper/bin/x64$${DIR_SUFFIX}" -lzydis_wrapper
     LIBS += -L"$$PWD/../capstone_wrapper/capstone" -lcapstone_x64
-    LIBS += -L"$$PWD/../capstone_wrapper/bin/x64" -lcapstone_wrapper
+    LIBS += -L"$$PWD/../capstone_wrapper/bin/x64$${DIR_SUFFIX}" -lcapstone_wrapper
     LIBS += -L"$$PWD/Src/ThirdPartyLibs/snowman" -lsnowman_x64
+    LIBS += -L"$$PWD/Src/ThirdPartyLibs/ldconvert" -lldconvert_x64
     LIBS += -L"$${X64_BIN_DIR}" -lx64bridge
 }

@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>381</width>
-    <height>325</height>
+    <height>514</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -283,6 +283,97 @@
         </widget>
        </item>
        <item>
+        <widget class="QCheckBox" name="chkTraceRecordEnabledDuringTrace">
+         <property name="text">
+          <string>Enable Trace Record Recording during a Trace</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkSkipInt3Stepping">
+         <property name="text">
+          <string>Skip INT3 stepping</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkNoScriptTimeout">
+         <property name="text">
+          <string>No Script Timeout Warning</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkIgnoreInconsistentBreakpoints">
+         <property name="text">
+          <string>&amp;Ignore inconsistent breakpoints</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkHardcoreThreadSwitchWarning">
+         <property name="text">
+          <string>Log If the Thread Has Switched</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkVerboseExceptionLogging">
+         <property name="text">
+          <string>Enable Verbose Exception Logging</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkNoWow64SingleStepWorkaround">
+         <property name="text">
+          <string>Disable WOW64 Single Step Workaround</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_6">
+         <item>
+          <widget class="QLabel" name="lblMaxTraceCount">
+           <property name="text">
+            <string>Default maximum trace &amp;count</string>
+           </property>
+           <property name="buddy">
+            <cstring>spinMaxTraceCount</cstring>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QSpinBox" name="spinMaxTraceCount">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="wrapping">
+            <bool>false</bool>
+           </property>
+           <property name="frame">
+            <bool>true</bool>
+           </property>
+           <property name="buttonSymbols">
+            <enum>QAbstractSpinBox::UpDownArrows</enum>
+           </property>
+           <property name="minimum">
+            <number>1</number>
+           </property>
+           <property name="maximum">
+            <number>2147483647</number>
+           </property>
+           <property name="value">
+            <number>50000</number>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
         <spacer name="verticalSpacer">
          <property name="orientation">
           <enum>Qt::Vertical</enum>
@@ -420,6 +511,92 @@
         </widget>
        </item>
        <item>
+        <widget class="QCheckBox" name="chkNoHighlightOperands">
+         <property name="text">
+          <string>Don't highlight operands</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkNoCurrentModuleText">
+         <property name="text">
+          <string>Hide module name for local memory addresses</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkPermanentHighlightingMode">
+         <property name="text">
+          <string>Permanent highlighting mode</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chk0xPrefixValues">
+         <property name="text">
+          <string>0x prefix for values</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkNoSourceLinesAutoComments">
+         <property name="text">
+          <string>Don't show source lines in comments</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_7">
+         <item>
+          <widget class="QLabel" name="lblMaximumModuleNameSize">
+           <property name="enabled">
+            <bool>true</bool>
+           </property>
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="minimumSize">
+            <size>
+             <width>0</width>
+             <height>0</height>
+            </size>
+           </property>
+           <property name="text">
+            <string>Maximum module name size</string>
+           </property>
+           <property name="buddy">
+            <cstring>spinMaximumModuleNameSize</cstring>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QSpinBox" name="spinMaximumModuleNameSize">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>16777215</width>
+             <height>16777215</height>
+            </size>
+           </property>
+           <property name="minimum">
+            <number>-1</number>
+           </property>
+           <property name="maximum">
+            <number>2147483647</number>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
         <spacer name="verticalSpacer_2">
          <property name="orientation">
           <enum>Qt::Vertical</enum>
@@ -455,7 +632,56 @@
        <item>
         <widget class="QCheckBox" name="chkSaveColumnOrder">
          <property name="text">
-          <string>Save column order and width</string>
+          <string>Save GUI layout and column orders</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkNoCloseDialog">
+         <property name="text">
+          <string>Don't show close dialog</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkPidInHex">
+         <property name="text">
+          <string>Show PID in HEX</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkSaveLoadTabOrder">
+         <property name="text">
+          <string>Enable Load/Save Tab Order</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkSidebarWatchLabels">
+         <property name="text">
+          <string>Show Watch Labels in Side Bar</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkNoForegroundWindow">
+         <property name="text">
+          <string>Do not call SetForegroundWindow</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkShowGraphRva">
+         <property name="text">
+          <string>Show RVA addresses in graph view</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkShowExitConfirmation">
+         <property name="text">
+          <string>Show exit confirmation dialog</string>
          </property>
         </widget>
        </item>
@@ -553,13 +779,46 @@
           </widget>
          </item>
          <item>
-          <widget class="QCheckBox" name="chkSaveLoadTabOrder">
-           <property name="text">
-            <string>Enable Load/Save Tab Order</string>
+          <widget class="QGroupBox" name="groupBox_3">
+           <property name="title">
+            <string>Search Engine URL</string>
            </property>
+           <layout class="QHBoxLayout" name="horizontalLayout_5">
+            <item>
+             <widget class="QLineEdit" name="editHelpOnSymbolicNameUrl"/>
+            </item>
+           </layout>
           </widget>
          </item>
         </layout>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkUtf16LogRedirect">
+         <property name="text">
+          <string>UTF-16 Log Redirect*</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkUseLocalHelpFile">
+         <property name="text">
+          <string>Use local help file (x64dbg.chm)</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkQueryProcessCookie">
+         <property name="text">
+          <string>Query process cookie*</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkQueryWorkingSet">
+         <property name="text">
+          <string>Query working set before reading memory</string>
+         </property>
+        </widget>
        </item>
        <item>
         <spacer name="verticalSpacer_3">

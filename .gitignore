@@ -13,6 +13,8 @@ doxygen*/
 doc/
 COV/
 minidump/
+CppDependOut/
+.vs/
 
 # Global filetypes to ignore
 *.depend
@@ -26,6 +28,7 @@ minidump/
 *.opensdf
 *.sdf
 *.suo
+*.VC.opendb
 *.autosave
 *.~vsd
 *.dll
@@ -40,12 +43,16 @@ ui_*
 .DS_Store
 *.ipgset
 pin.log*
+*.cdproj
+src/gui/Translations/*.qm
+x64dbg.VC.db
 
 # Project to ignore
 help/x64*dbg.chm
 help/output/
 bin/x64*dbg.chm
 bin/win32.*
+bin/x*.unicode.txt
 
 # Debugger files to ignore
 CppCheckResults.xml
@@ -66,5 +73,6 @@ src/build-*/
 !/hooks/AStyle.dll
 !/bin/x64dbg_shell_remove.reg
 !*.lib
-pin.log
-src/gui/Translations/*.qm
+.scannerwork/
+bw-output/
+build-wrapper*

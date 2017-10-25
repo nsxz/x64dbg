@@ -4,6 +4,8 @@
 #include <QFontDialog>
 #include <QMessageBox>
 #include "Configuration.h"
+#include "StringUtil.h"
+#include "MiscUtil.h"
 
 AppearanceDialog::AppearanceDialog(QWidget* parent) : QDialog(parent), ui(new Ui::AppearanceDialog)
 {
@@ -11,7 +13,6 @@ AppearanceDialog::AppearanceDialog(QWidget* parent) : QDialog(parent), ui(new Ui
     //set window flags
     setModal(true);
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
-    setFixedSize(this->size()); //fixed size
     //Colors
     colorMap = &Config()->Colors;
     colorBackupMap = *colorMap;
@@ -254,7 +255,7 @@ void AppearanceDialog::on_buttonBackgroundColor_clicked()
         initialColor = Qt::black; //transparent will set the alpha channel, which users will forget
     else
         initialColor = QColor(ui->editBackgroundColor->text());
-    QColor selectedColor = QColorDialog::getColor(initialColor, this, "Select Color", QColorDialog::ShowAlphaChannel);
+    QColor selectedColor = QColorDialog::getColor(initialColor, this, tr("Select Color"), QColorDialog::ShowAlphaChannel);
     if(selectedColor.isValid())
     {
         if(!selectedColor.alpha())
@@ -325,7 +326,7 @@ void AppearanceDialog::on_buttonSave_clicked()
     Config()->writeFonts();
     GuiUpdateAllViews();
     BridgeSettingFlush();
-    GuiAddStatusBarMessage("Settings saved!\n");
+    GuiAddStatusBarMessage(tr("Settings saved!\n").toUtf8().constData());
 }
 
 void AppearanceDialog::defaultValueSlot()
@@ -406,127 +407,165 @@ void AppearanceDialog::colorInfoListInit()
     colorInfoIndex = 0;
     colorInfoList.clear();
     //list entries
-    colorInfoListAppend("General Tables:", "", "");
-    colorInfoListAppend("Text", "AbstractTableViewTextColor", "");
-    colorInfoListAppend("Header Text", "AbstractTableViewHeaderTextColor", "");
-    colorInfoListAppend("Background", "AbstractTableViewBackgroundColor", "");
-    colorInfoListAppend("Selection", "AbstractTableViewSelectionColor", "");
-    colorInfoListAppend("Separators", "AbstractTableViewSeparatorColor", "");
+    colorInfoListAppend(tr("General Tables:"), "", "");
+    colorInfoListAppend(tr("Text"), "AbstractTableViewTextColor", "");
+    colorInfoListAppend(tr("Header Text"), "AbstractTableViewHeaderTextColor", "");
+    colorInfoListAppend(tr("Background"), "AbstractTableViewBackgroundColor", "");
+    colorInfoListAppend(tr("Selection"), "AbstractTableViewSelectionColor", "");
+    colorInfoListAppend(tr("Separators"), "AbstractTableViewSeparatorColor", "");
 
-    colorInfoListAppend("Disassembly:", "", "");
-    colorInfoListAppend("Background", "DisassemblyBackgroundColor", "");
-    colorInfoListAppend("Selection", "DisassemblySelectionColor", "");
-    colorInfoListAppend("Bytes", "DisassemblyBytesColor", "");
-    colorInfoListAppend("Modified Bytes", "DisassemblyModifiedBytesColor", "");
-    colorInfoListAppend("Restored Bytes", "DisassemblyRestoredBytesColor", "");
-#ifdef _WIN64
-    colorInfoListAppend("RIP", "DisassemblyCipColor", "DisassemblyCipBackgroundColor");
-#else //x86
-    colorInfoListAppend("EIP", "DisassemblyCipColor", "DisassemblyCipBackgroundColor");
-#endif //_WIN64
-    colorInfoListAppend("Breakpoints", "DisassemblyBreakpointColor", "DisassemblyBreakpointBackgroundColor");
-    colorInfoListAppend("Hardware Breakpoints", "DisassemblyHardwareBreakpointColor", "DisassemblyHardwareBreakpointBackgroundColor");
-    colorInfoListAppend("Bookmarks", "DisassemblyBookmarkColor", "DisassemblyBookmarkBackgroundColor");
-    colorInfoListAppend("Comments", "DisassemblyCommentColor", "DisassemblyCommentBackgroundColor");
-    colorInfoListAppend("Automatic Comments", "DisassemblyAutoCommentColor", "DisassemblyAutoCommentBackgroundColor");
-    colorInfoListAppend("Mnemonic Brief Comments", "DisassemblyMnemonicBriefColor", "DisassemblyMnemonicBriefBackgroundColor");
-    colorInfoListAppend("Labels", "DisassemblyLabelColor", "DisassemblyLabelBackgroundColor");
-    colorInfoListAppend("Addresses", "DisassemblyAddressColor", "DisassemblyAddressBackgroundColor");
-    colorInfoListAppend("Selected Addresses", "DisassemblySelectedAddressColor", "DisassemblySelectedAddressBackgroundColor");
-    colorInfoListAppend("Conditional Jump Lines (jump)", "DisassemblyConditionalJumpLineTrueColor", "");
-    colorInfoListAppend("Conditional Jump Lines (no jump)", "DisassemblyConditionalJumpLineFalseColor", "");
-    colorInfoListAppend("Unconditional Jump Lines", "DisassemblyUnconditionalJumpLineColor", "");
+    colorInfoListAppend(tr("Disassembly:"), "", "");
+    colorInfoListAppend(tr("Background"), "DisassemblyBackgroundColor", "");
+    colorInfoListAppend(tr("Selection"), "DisassemblySelectionColor", "");
+    colorInfoListAppend(tr("Bytes"), "DisassemblyBytesColor", "DisassemblyBytesBackgroundColor");
+    colorInfoListAppend(tr("Modified Bytes"), "DisassemblyModifiedBytesColor", "DisassemblyModifiedBytesBackgroundColor");
+    colorInfoListAppend(tr("Restored Bytes"), "DisassemblyRestoredBytesColor", "DisassemblyRestoredBytesBackgroundColor");
+    colorInfoListAppend(tr("0x00 Bytes"), "DisassemblyByte00Color", "DisassemblyByte00BackgroundColor");
+    colorInfoListAppend(tr("0x7F Bytes"), "DisassemblyByte7FColor", "DisassemblyByte7FBackgroundColor");
+    colorInfoListAppend(tr("0xFF Bytes"), "DisassemblyByteFFColor", "DisassemblyByteFFBackgroundColor");
+    colorInfoListAppend(tr("IsPrint Bytes"), "DisassemblyByteIsPrintColor", "DisassemblyByteIsPrintBackgroundColor");
+    colorInfoListAppend(tr("Relocation underline"), "DisassemblyRelocationUnderlineColor", "");
+    colorInfoListAppend(ArchValue(tr("EIP"), tr("RIP")), "DisassemblyCipColor", "DisassemblyCipBackgroundColor");
+    colorInfoListAppend(tr("Breakpoints"), "DisassemblyBreakpointColor", "DisassemblyBreakpointBackgroundColor");
+    colorInfoListAppend(tr("Hardware Breakpoints"), "DisassemblyHardwareBreakpointColor", "DisassemblyHardwareBreakpointBackgroundColor");
+    colorInfoListAppend(tr("Bookmarks"), "DisassemblyBookmarkColor", "DisassemblyBookmarkBackgroundColor");
+    colorInfoListAppend(tr("Comments"), "DisassemblyCommentColor", "DisassemblyCommentBackgroundColor");
+    colorInfoListAppend(tr("Automatic Comments"), "DisassemblyAutoCommentColor", "DisassemblyAutoCommentBackgroundColor");
+    colorInfoListAppend(tr("Mnemonic Brief Comments"), "DisassemblyMnemonicBriefColor", "DisassemblyMnemonicBriefBackgroundColor");
+    colorInfoListAppend(tr("Labels"), "DisassemblyLabelColor", "DisassemblyLabelBackgroundColor");
+    colorInfoListAppend(tr("Addresses"), "DisassemblyAddressColor", "DisassemblyAddressBackgroundColor");
+    colorInfoListAppend(tr("Selected Addresses"), "DisassemblySelectedAddressColor", "DisassemblySelectedAddressBackgroundColor");
+    colorInfoListAppend(tr("Conditional Jump Lines (jump)"), "DisassemblyConditionalJumpLineTrueColor", "");
+    colorInfoListAppend(tr("Conditional Jump Lines (no jump)"), "DisassemblyConditionalJumpLineFalseColor", "");
+    colorInfoListAppend(tr("Unconditional Jump Lines"), "DisassemblyUnconditionalJumpLineColor", "");
     colorInfoListAppend(tr("Traced line"), "DisassemblyTracedBackgroundColor", "");
-    colorInfoListAppend("Function Lines", "DisassemblyFunctionColor", "");
-    colorInfoListAppend("Loop Lines", "DisassemblyLoopColor", "");
+    colorInfoListAppend(tr("Function Lines"), "DisassemblyFunctionColor", "");
+    colorInfoListAppend(tr("Loop Lines"), "DisassemblyLoopColor", "");
 
-    colorInfoListAppend("SideBar:", "", "");
-    colorInfoListAppend("Register Labels", "SideBarCipLabelColor", "SideBarCipLabelBackgroundColor");
-    colorInfoListAppend("Bullets", "SideBarBulletColor", "");
-    colorInfoListAppend("Breakpoints", "SideBarBulletBreakpointColor", "");
-    colorInfoListAppend("Disabled Breakpoints", "SideBarBulletDisabledBreakpointColor", "");
-    colorInfoListAppend("Bookmarks", "SideBarBulletBookmarkColor", "");
-    colorInfoListAppend("Conditional Jump Lines (jump)", "SideBarConditionalJumpLineTrueColor", "");
-    colorInfoListAppend("Conditional Jump Lines (no jump)", "SideBarConditionalJumpLineFalseColor", "");
-    colorInfoListAppend("Unconditional Jump Lines (jump)", "SideBarUnconditionalJumpLineTrueColor", "");
-    colorInfoListAppend("Unconditional Jump Lines (no jump)", "SideBarUnconditionalJumpLineFalseColor", "");
-    colorInfoListAppend("Jump Lines (executing)", "SideBarJumpLineExecuteColor", "");
-    colorInfoListAppend("Background", "SideBarBackgroundColor", "");
+    colorInfoListAppend(tr("SideBar:"), "", "");
+    colorInfoListAppend(tr("Register Labels"), "SideBarCipLabelColor", "SideBarCipLabelBackgroundColor");
+    colorInfoListAppend(tr("Bullets"), "SideBarBulletColor", "");
+    colorInfoListAppend(tr("Breakpoints"), "SideBarBulletBreakpointColor", "");
+    colorInfoListAppend(tr("Disabled Breakpoints"), "SideBarBulletDisabledBreakpointColor", "");
+    colorInfoListAppend(tr("Bookmarks"), "SideBarBulletBookmarkColor", "");
+    colorInfoListAppend(tr("Conditional Jump Lines (jump)"), "SideBarConditionalJumpLineTrueColor", "");
+    colorInfoListAppend(tr("Conditional Jump Lines (no jump)"), "SideBarConditionalJumpLineFalseColor", "");
+    colorInfoListAppend(tr("Unconditional Jump Lines (jump)"), "SideBarUnconditionalJumpLineTrueColor", "");
+    colorInfoListAppend(tr("Unconditional Jump Lines (no jump)"), "SideBarUnconditionalJumpLineFalseColor", "");
+    colorInfoListAppend(tr("Jump Lines (executing)"), "SideBarJumpLineExecuteColor", "");
+    colorInfoListAppend(tr("Code Folding Checkbox Color"), "SideBarCheckBoxForeColor", "SideBarCheckBoxBackColor");
+    colorInfoListAppend(tr("Background"), "SideBarBackgroundColor", "");
 
-    colorInfoListAppend("Registers:", "", "");
-    colorInfoListAppend("Text", "RegistersColor", "");
-    colorInfoListAppend("Background", "RegistersBackgroundColor", "");
-    colorInfoListAppend("Selection", "RegistersSelectionColor", "");
-    colorInfoListAppend("Modified Registers", "RegistersModifiedColor", "");
-    colorInfoListAppend("Register Names", "RegistersLabelColor", "");
-    colorInfoListAppend("Argument Register Names", "RegistersArgumentLabelColor", "");
-    colorInfoListAppend("Extra Information", "RegistersExtraInfoColor", "");
+    colorInfoListAppend(tr("Registers:"), "", "");
+    colorInfoListAppend(tr("Text"), "RegistersColor", "");
+    colorInfoListAppend(tr("Background"), "RegistersBackgroundColor", "");
+    colorInfoListAppend(tr("Selection"), "RegistersSelectionColor", "");
+    colorInfoListAppend(tr("Modified Registers"), "RegistersModifiedColor", "");
+    colorInfoListAppend(tr("Register Names"), "RegistersLabelColor", "");
+    colorInfoListAppend(tr("Argument Register Names"), "RegistersArgumentLabelColor", "");
+    colorInfoListAppend(tr("Extra Information"), "RegistersExtraInfoColor", "");
+    colorInfoListAppend(tr("Highlight Read"), "RegistersHighlightReadColor", "");
+    colorInfoListAppend(tr("Highlight Write"), "RegistersHighlightWriteColor", "");
+    colorInfoListAppend(tr("Highlight Read+Write"), "RegistersHighlightReadWriteColor", "");
 
-    colorInfoListAppend("Instructions:", "", "");
-    colorInfoListAppend("Text", "InstructionUncategorizedColor", "InstructionUncategorizedBackgroundColor");
-    colorInfoListAppend("Highlighting", "InstructionHighlightColor", "");
-    colorInfoListAppend("Commas", "InstructionCommaColor", "InstructionCommaBackgroundColor");
-    colorInfoListAppend("Prefixes", "InstructionPrefixColor", "InstructionPrefixBackgroundColor");
-    colorInfoListAppend("Addresses", "InstructionAddressColor", "InstructionAddressBackgroundColor");
-    colorInfoListAppend("Values", "InstructionValueColor", "InstructionValueBackgroundColor");
-    colorInfoListAppend("Mnemonics", "InstructionMnemonicColor", "InstructionMnemonicBackgroundColor");
-    colorInfoListAppend("Push/Pops", "InstructionPushPopColor", "InstructionPushPopBackgroundColor");
-    colorInfoListAppend("Calls", "InstructionCallColor", "InstructionCallBackgroundColor");
-    colorInfoListAppend("Returns", "InstructionRetColor", "InstructionRetBackgroundColor");
-    colorInfoListAppend("Conditional Jumps", "InstructionConditionalJumpColor", "InstructionConditionalJumpBackgroundColor");
-    colorInfoListAppend("Unconditional Jumps", "InstructionUnconditionalJumpColor", "InstructionUnconditionalJumpBackgroundColor");
-    colorInfoListAppend("NOPs", "InstructionNopColor", "InstructionNopBackgroundColor");
-    colorInfoListAppend("FAR", "InstructionFarColor", "InstructionFarBackgroundColor");
-    colorInfoListAppend("INT3s", "InstructionInt3Color", "InstructionInt3BackgroundColor");
-    colorInfoListAppend("Unusual Instructions", "InstructionUnusualColor", "InstructionUnusualBackgroundColor");
-    colorInfoListAppend("General Registers", "InstructionGeneralRegisterColor", "InstructionGeneralRegisterBackgroundColor");
-    colorInfoListAppend("FPU Registers", "InstructionFpuRegisterColor", "InstructionFpuRegisterBackgroundColor");
-    colorInfoListAppend("MMX Registers", "InstructionMmxRegisterColor", "InstructionMmxRegisterBackgroundColor");
-    colorInfoListAppend("XMM Registers", "InstructionXmmRegisterColor", "InstructionXmmRegisterBackgroundColor");
-    colorInfoListAppend("YMM Registers", "InstructionYmmRegisterColor", "InstructionYmmRegisterBackgroundColor");
-    colorInfoListAppend("ZMM Registers", "InstructionZmmRegisterColor", "InstructionZmmRegisterBackgroundColor");
-    colorInfoListAppend("Memory Sizes", "InstructionMemorySizeColor", "InstructionMemorySizeBackgroundColor");
-    colorInfoListAppend("Memory Segments", "InstructionMemorySegmentColor", "InstructionMemorySegmentBackgroundColor");
-    colorInfoListAppend("Memory Brackets", "InstructionMemoryBracketsColor", "InstructionMemoryBracketsBackgroundColor");
-    colorInfoListAppend("Memory Stack Brackets", "InstructionMemoryStackBracketsColor", "InstructionMemoryStackBracketsBackgroundColor");
-    colorInfoListAppend("Memory Base Registers", "InstructionMemoryBaseRegisterColor", "InstructionMemoryBaseRegisterBackgroundColor");
-    colorInfoListAppend("Memory Index Registers", "InstructionMemoryIndexRegisterColor", "InstructionMemoryIndexRegisterBackgroundColor");
-    colorInfoListAppend("Memory Scales", "InstructionMemoryScaleColor", "InstructionMemoryScaleBackgroundColor");
-    colorInfoListAppend("Memory Operators (+/-/*)", "InstructionMemoryOperatorColor", "InstructionMemoryOperatorBackgroundColor");
+    colorInfoListAppend(tr("Instructions:"), "", "");
+    colorInfoListAppend(tr("Text"), "InstructionUncategorizedColor", "InstructionUncategorizedBackgroundColor");
+    colorInfoListAppend(tr("Highlighting"), "InstructionHighlightColor", "");
+    colorInfoListAppend(tr("Commas"), "InstructionCommaColor", "InstructionCommaBackgroundColor");
+    colorInfoListAppend(tr("Prefixes"), "InstructionPrefixColor", "InstructionPrefixBackgroundColor");
+    colorInfoListAppend(tr("Addresses"), "InstructionAddressColor", "InstructionAddressBackgroundColor");
+    colorInfoListAppend(tr("Values"), "InstructionValueColor", "InstructionValueBackgroundColor");
+    colorInfoListAppend(tr("Mnemonics"), "InstructionMnemonicColor", "InstructionMnemonicBackgroundColor");
+    colorInfoListAppend(tr("Push/Pops"), "InstructionPushPopColor", "InstructionPushPopBackgroundColor");
+    colorInfoListAppend(tr("Calls"), "InstructionCallColor", "InstructionCallBackgroundColor");
+    colorInfoListAppend(tr("Returns"), "InstructionRetColor", "InstructionRetBackgroundColor");
+    colorInfoListAppend(tr("Conditional Jumps"), "InstructionConditionalJumpColor", "InstructionConditionalJumpBackgroundColor");
+    colorInfoListAppend(tr("Unconditional Jumps"), "InstructionUnconditionalJumpColor", "InstructionUnconditionalJumpBackgroundColor");
+    colorInfoListAppend(tr("NOPs"), "InstructionNopColor", "InstructionNopBackgroundColor");
+    colorInfoListAppend(tr("FAR"), "InstructionFarColor", "InstructionFarBackgroundColor");
+    colorInfoListAppend(tr("INT3s"), "InstructionInt3Color", "InstructionInt3BackgroundColor");
+    colorInfoListAppend(tr("Unusual Instructions"), "InstructionUnusualColor", "InstructionUnusualBackgroundColor");
+    colorInfoListAppend(tr("General Registers"), "InstructionGeneralRegisterColor", "InstructionGeneralRegisterBackgroundColor");
+    colorInfoListAppend(tr("FPU Registers"), "InstructionFpuRegisterColor", "InstructionFpuRegisterBackgroundColor");
+    colorInfoListAppend(tr("MMX Registers"), "InstructionMmxRegisterColor", "InstructionMmxRegisterBackgroundColor");
+    colorInfoListAppend(tr("XMM Registers"), "InstructionXmmRegisterColor", "InstructionXmmRegisterBackgroundColor");
+    colorInfoListAppend(tr("YMM Registers"), "InstructionYmmRegisterColor", "InstructionYmmRegisterBackgroundColor");
+    colorInfoListAppend(tr("ZMM Registers"), "InstructionZmmRegisterColor", "InstructionZmmRegisterBackgroundColor");
+    colorInfoListAppend(tr("Memory Sizes"), "InstructionMemorySizeColor", "InstructionMemorySizeBackgroundColor");
+    colorInfoListAppend(tr("Memory Segments"), "InstructionMemorySegmentColor", "InstructionMemorySegmentBackgroundColor");
+    colorInfoListAppend(tr("Memory Brackets"), "InstructionMemoryBracketsColor", "InstructionMemoryBracketsBackgroundColor");
+    colorInfoListAppend(tr("Memory Stack Brackets"), "InstructionMemoryStackBracketsColor", "InstructionMemoryStackBracketsBackgroundColor");
+    colorInfoListAppend(tr("Memory Base Registers"), "InstructionMemoryBaseRegisterColor", "InstructionMemoryBaseRegisterBackgroundColor");
+    colorInfoListAppend(tr("Memory Index Registers"), "InstructionMemoryIndexRegisterColor", "InstructionMemoryIndexRegisterBackgroundColor");
+    colorInfoListAppend(tr("Memory Scales"), "InstructionMemoryScaleColor", "InstructionMemoryScaleBackgroundColor");
+    colorInfoListAppend(tr("Memory Operators (+/-/*)"), "InstructionMemoryOperatorColor", "InstructionMemoryOperatorBackgroundColor");
 
-    colorInfoListAppend("HexDump:", "", "");
-    colorInfoListAppend("Text", "HexDumpTextColor", "");
-    colorInfoListAppend("Modified Bytes", "HexDumpModifiedBytesColor", "");
-    colorInfoListAppend("Background", "HexDumpBackgroundColor", "");
-    colorInfoListAppend("Selection", "HexDumpSelectionColor", "");
-    colorInfoListAppend("Addresses", "HexDumpAddressColor", "HexDumpAddressBackgroundColor");
-    colorInfoListAppend("Labels", "HexDumpLabelColor", "HexDumpLabelBackgroundColor");
+    colorInfoListAppend(tr("HexDump:"), "", "");
+    colorInfoListAppend(tr("Text"), "HexDumpTextColor", "");
+    colorInfoListAppend(tr("Modified Bytes"), "HexDumpModifiedBytesColor", "HexDumpModifiedBytesBackgroundColor");
+    colorInfoListAppend(tr("Restored Bytes"), "HexDumpRestoredBytesColor", "HexDumpRestoredBytesBackgroundColor");
+    colorInfoListAppend(tr("0x00 Bytes"), "HexDumpByte00Color", "HexDumpByte00BackgroundColor");
+    colorInfoListAppend(tr("0x7F Bytes"), "HexDumpByte7FColor", "HexDumpByte7FBackgroundColor");
+    colorInfoListAppend(tr("0xFF Bytes"), "HexDumpByteFFColor", "HexDumpByteFFBackgroundColor");
+    colorInfoListAppend(tr("IsPrint Bytes"), "HexDumpByteIsPrintColor", "HexDumpByteIsPrintBackgroundColor");
+    colorInfoListAppend(tr("Background"), "HexDumpBackgroundColor", "");
+    colorInfoListAppend(tr("Selection"), "HexDumpSelectionColor", "");
+    colorInfoListAppend(tr("Addresses"), "HexDumpAddressColor", "HexDumpAddressBackgroundColor");
+    colorInfoListAppend(tr("Labels"), "HexDumpLabelColor", "HexDumpLabelBackgroundColor");
+    colorInfoListAppend(tr("User Code Pointer Highlight Color"), "HexDumpUserModuleCodePointerHighlightColor", "");
+    colorInfoListAppend(tr("User Data Pointer Highlight Color"), "HexDumpUserModuleDataPointerHighlightColor", "");
+    colorInfoListAppend(tr("System Code Pointer Highlight Color"), "HexDumpSystemModuleCodePointerHighlightColor", "");
+    colorInfoListAppend(tr("System Data Pointer Highlight Color"), "HexDumpSystemModuleDataPointerHighlightColor", "");
+    colorInfoListAppend(tr("Unknown Code Pointer Highlight Color"), "HexDumpUnknownCodePointerHighlightColor", "");
+    colorInfoListAppend(tr("Unknown Data Pointer Highlight Color"), "HexDumpUnknownDataPointerHighlightColor", "");
 
-    colorInfoListAppend("Stack:", "", "");
-    colorInfoListAppend("Text", "StackTextColor", "");
-    colorInfoListAppend("Inactive Text", "StackInactiveTextColor", "");
-    colorInfoListAppend("Background", "StackBackgroundColor", "");
-    colorInfoListAppend("Selection", "StackSelectionColor", "");
-#ifdef _WIN64
-    colorInfoListAppend("RSP", "StackCspColor", "StackCspBackgroundColor");
-#else //x86
-    colorInfoListAppend("CSP", "StackCspColor", "StackCspBackgroundColor");
-#endif //_WIN64
-    colorInfoListAppend("Addresses", "StackAddressColor", "StackAddressBackgroundColor");
-    colorInfoListAppend("Selected Addresses", "StackSelectedAddressColor", "StackSelectedAddressBackgroundColor");
-    colorInfoListAppend("Labels", "StackLabelColor", "StackLabelBackgroundColor");
+    colorInfoListAppend(tr("Stack:"), "", "");
+    colorInfoListAppend(tr("Text"), "StackTextColor", "");
+    colorInfoListAppend(tr("Inactive Text"), "StackInactiveTextColor", "");
+    colorInfoListAppend(tr("Background"), "StackBackgroundColor", "");
+    colorInfoListAppend(tr("Selection"), "StackSelectionColor", "");
+    colorInfoListAppend(ArchValue(tr("ESP"), tr("RSP")), "StackCspColor", "StackCspBackgroundColor");
+    colorInfoListAppend(tr("Addresses"), "StackAddressColor", "StackAddressBackgroundColor");
+    colorInfoListAppend(tr("Selected Addresses"), "StackSelectedAddressColor", "StackSelectedAddressBackgroundColor");
+    colorInfoListAppend(tr("Labels"), "StackLabelColor", "StackLabelBackgroundColor");
+    colorInfoListAppend(tr("Return To Comment"), "StackReturnToColor", "");
+    colorInfoListAppend(tr("SEH Chain Comment"), "StackSEHChainColor", "");
+    colorInfoListAppend(tr("User Stack Frame Line"), "StackFrameColor", "");
+    colorInfoListAppend(tr("System Stack Frame Line"), "StackFrameSystemColor", "");
 
-    colorInfoListAppend("HexEdit:", "", "");
-    colorInfoListAppend("Text", "HexEditTextColor", "");
-    colorInfoListAppend("Wildcards", "HexEditWildcardColor", "");
-    colorInfoListAppend("Background", "HexEditBackgroundColor", "");
-    colorInfoListAppend("Selection", "HexEditSelectionColor", "");
+    colorInfoListAppend(tr("HexEdit:"), "", "");
+    colorInfoListAppend(tr("Text"), "HexEditTextColor", "");
+    colorInfoListAppend(tr("Wildcards"), "HexEditWildcardColor", "");
+    colorInfoListAppend(tr("Background"), "HexEditBackgroundColor", "");
+    colorInfoListAppend(tr("Selection"), "HexEditSelectionColor", "");
 
-    colorInfoListAppend("Other:", "", "");
-    colorInfoListAppend("Current Thread", "ThreadCurrentColor", "ThreadCurrentBackgroundColor");
-    colorInfoListAppend("Memory Map Breakpoint", "MemoryMapBreakpointColor", "MemoryMapBreakpointBackgroundColor");
-    colorInfoListAppend("Memory Map Section Text", "MemoryMapSectionTextColor", "");
-    colorInfoListAppend("Search Highlight Color", "SearchListViewHighlightColor", "");
+    colorInfoListAppend(tr("Graph:"), "", "");
+    colorInfoListAppend(tr("Background"), "GraphBackgroundColor", "");
+    colorInfoListAppend(tr("Node"), "GraphNodeColor", "GraphNodeBackgroundColor");
+    colorInfoListAppend(tr("Terminal node shadow"), "GraphRetShadowColor", "");
+    colorInfoListAppend(tr("Indirect call shadow"), "GraphIndirectcallShadowColor", "");
+    colorInfoListAppend(tr("Unconditional branch line"), "GraphJmpColor", "");
+    colorInfoListAppend(tr("True branch line"), "GraphBrtrueColor", "");
+    colorInfoListAppend(tr("False branch line"), "GraphBrfalseColor", "");
+    colorInfoListAppend(ArchValue(tr("EIP"), tr("RIP")), "GraphCipColor", "");
+    colorInfoListAppend(tr("Breakpoint"), "GraphBreakpointColor", "");
+    colorInfoListAppend(tr("Disabled Breakpoint"), "GraphDisabledBreakpointColor", "");
+
+    colorInfoListAppend(tr("Other:"), "", "");
+    colorInfoListAppend(tr("Current Thread"), "ThreadCurrentColor", "ThreadCurrentBackgroundColor");
+    colorInfoListAppend(tr("Watch (When Watchdog is Triggered)"), "WatchTriggeredColor", "WatchTriggeredBackgroundColor");
+    colorInfoListAppend(tr("Memory Map Breakpoint"), "MemoryMapBreakpointColor", "MemoryMapBreakpointBackgroundColor");
+    colorInfoListAppend(tr("Memory Map %1").arg(ArchValue(tr("EIP"), tr("RIP"))), "MemoryMapCipColor", "MemoryMapCipBackgroundColor");
+    colorInfoListAppend(tr("Memory Map Section Text"), "MemoryMapSectionTextColor", "");
+    colorInfoListAppend(tr("Search Highlight Color"), "SearchListViewHighlightColor", "");
+    colorInfoListAppend(tr("Struct primary background"), "StructBackgroundColor", "");
+    colorInfoListAppend(tr("Struct secondary background"), "StructAlternateBackgroundColor", "");
+    colorInfoListAppend(tr("Log Link Color") + "*", "LogLinkColor", "LogLinkBackgroundColor");
+    colorInfoListAppend(tr("Breakpoint Summary Parentheses"), "BreakpointSummaryParenColor", "");
+    colorInfoListAppend(tr("Breakpoint Summary Keywords"), "BreakpointSummaryKeywordColor", "");
+    colorInfoListAppend(tr("Breakpoint Summary Strings"), "BreakpointSummaryStringColor", "");
+    colorInfoListAppend(tr("Patch located in relocation region"), "PatchRelocatedByteHighlightColor", "");
+
 
     //dev helper
     const QMap<QString, QColor>* Colors = &Config()->defaultColors;
@@ -547,20 +586,14 @@ void AppearanceDialog::colorInfoListInit()
             notFound += id + "\n";
     }
     if(notFound.length())
-    {
-        QMessageBox msg(QMessageBox::Warning, "NOT FOUND IN CONFIG!", notFound);
-        msg.setWindowIcon(QIcon(":/icons/images/compile-warning.png"));
-        msg.setParent(this, Qt::Dialog);
-        msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-        msg.exec();
-    }
+        SimpleWarningBox(this, tr("NOT FOUND IN CONFIG!"), notFound);
 
     //setup context menu
     ui->listColorNames->setContextMenuPolicy(Qt::ActionsContextMenu);
-    defaultValueAction = new QAction("&Default Value", this);
+    defaultValueAction = new QAction(tr("&Default Value"), this);
     defaultValueAction->setEnabled(false);
     connect(defaultValueAction, SIGNAL(triggered()), this, SLOT(defaultValueSlot()));
-    currentSettingAction = new QAction("&Current Setting", this);
+    currentSettingAction = new QAction(tr("&Current Setting"), this);
     currentSettingAction->setEnabled(false);
     connect(currentSettingAction, SIGNAL(triggered()), this, SLOT(currentSettingSlot()));
     ui->listColorNames->addAction(defaultValueAction);
@@ -691,6 +724,7 @@ void AppearanceDialog::on_fontAbstractTablesStyle_currentIndexChanged(int index)
     QFont font = fontMap->find(id).value();
     font.setBold(false);
     font.setItalic(false);
+    font.setKerning(false);
     if(index == 1 || index == 3)
         font.setBold(true);
     if(index == 2 || index == 3)
@@ -707,6 +741,7 @@ void AppearanceDialog::on_fontAbstractTablesSize_currentIndexChanged(const QStri
     QString id = "AbstractTableView";
     QFont font = fontMap->find(id).value();
     font.setPointSize(arg1.toInt());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;
@@ -719,6 +754,7 @@ void AppearanceDialog::on_fontDisassembly_currentFontChanged(const QFont & f)
     QString id = "Disassembly";
     QFont font = fontMap->find(id).value();
     font.setFamily(f.family());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;
@@ -732,6 +768,7 @@ void AppearanceDialog::on_fontDisassemblyStyle_currentIndexChanged(int index)
     QFont font = fontMap->find(id).value();
     font.setBold(false);
     font.setItalic(false);
+    font.setKerning(false);
     if(index == 1 || index == 3)
         font.setBold(true);
     if(index == 2 || index == 3)
@@ -748,6 +785,7 @@ void AppearanceDialog::on_fontDisassemblySize_currentIndexChanged(const QString 
     QString id = "Disassembly";
     QFont font = fontMap->find(id).value();
     font.setPointSize(arg1.toInt());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;
@@ -760,6 +798,7 @@ void AppearanceDialog::on_fontHexDump_currentFontChanged(const QFont & f)
     QString id = "HexDump";
     QFont font = fontMap->find(id).value();
     font.setFamily(f.family());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;
@@ -773,6 +812,7 @@ void AppearanceDialog::on_fontHexDumpStyle_currentIndexChanged(int index)
     QFont font = fontMap->find(id).value();
     font.setBold(false);
     font.setItalic(false);
+    font.setKerning(false);
     if(index == 1 || index == 3)
         font.setBold(true);
     if(index == 2 || index == 3)
@@ -789,6 +829,7 @@ void AppearanceDialog::on_fontHexDumpSize_currentIndexChanged(const QString & ar
     QString id = "HexDump";
     QFont font = fontMap->find(id).value();
     font.setPointSize(arg1.toInt());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;
@@ -801,6 +842,7 @@ void AppearanceDialog::on_fontStack_currentFontChanged(const QFont & f)
     QString id = "Stack";
     QFont font = fontMap->find(id).value();
     font.setFamily(f.family());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;
@@ -814,6 +856,7 @@ void AppearanceDialog::on_fontStackStyle_currentIndexChanged(int index)
     QFont font = fontMap->find(id).value();
     font.setBold(false);
     font.setItalic(false);
+    font.setKerning(false);
     if(index == 1 || index == 3)
         font.setBold(true);
     if(index == 2 || index == 3)
@@ -830,6 +873,7 @@ void AppearanceDialog::on_fontStackSize_currentIndexChanged(const QString & arg1
     QString id = "Stack";
     QFont font = fontMap->find(id).value();
     font.setPointSize(arg1.toInt());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;
@@ -842,6 +886,7 @@ void AppearanceDialog::on_fontRegisters_currentFontChanged(const QFont & f)
     QString id = "Registers";
     QFont font = fontMap->find(id).value();
     font.setFamily(f.family());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;
@@ -855,6 +900,7 @@ void AppearanceDialog::on_fontRegistersStyle_currentIndexChanged(int index)
     QFont font = fontMap->find(id).value();
     font.setBold(false);
     font.setItalic(false);
+    font.setKerning(false);
     if(index == 1 || index == 3)
         font.setBold(true);
     if(index == 2 || index == 3)
@@ -871,6 +917,7 @@ void AppearanceDialog::on_fontRegistersSize_currentIndexChanged(const QString & 
     QString id = "Registers";
     QFont font = fontMap->find(id).value();
     font.setPointSize(arg1.toInt());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;
@@ -883,6 +930,7 @@ void AppearanceDialog::on_fontHexEdit_currentFontChanged(const QFont & f)
     QString id = "HexEdit";
     QFont font = fontMap->find(id).value();
     font.setFamily(f.family());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;
@@ -896,6 +944,7 @@ void AppearanceDialog::on_fontHexEditStyle_currentIndexChanged(int index)
     QFont font = fontMap->find(id).value();
     font.setBold(false);
     font.setItalic(false);
+    font.setKerning(false);
     if(index == 1 || index == 3)
         font.setBold(true);
     if(index == 2 || index == 3)
@@ -912,6 +961,7 @@ void AppearanceDialog::on_fontHexEditSize_currentIndexChanged(const QString & ar
     QString id = "HexEdit";
     QFont font = fontMap->find(id).value();
     font.setPointSize(arg1.toInt());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;
@@ -924,6 +974,7 @@ void AppearanceDialog::on_fontLog_currentFontChanged(const QFont & f)
     QString id = "Log";
     QFont font = fontMap->find(id).value();
     font.setFamily(f.family());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;
@@ -937,6 +988,7 @@ void AppearanceDialog::on_fontLogStyle_currentIndexChanged(int index)
     QFont font = fontMap->find(id).value();
     font.setBold(false);
     font.setItalic(false);
+    font.setKerning(false);
     if(index == 1 || index == 3)
         font.setBold(true);
     if(index == 2 || index == 3)
@@ -953,6 +1005,7 @@ void AppearanceDialog::on_fontLogSize_currentIndexChanged(const QString & arg1)
     QString id = "Log";
     QFont font = fontMap->find(id).value();
     font.setPointSize(arg1.toInt());
+    font.setKerning(false);
     (*fontMap)[id] = font;
     if(isInit)
         return;

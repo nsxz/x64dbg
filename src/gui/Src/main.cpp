@@ -1,7 +1,13 @@
 #include "main.h"
+#include "zydis_wrapper.h"
 #include "capstone_wrapper.h"
+#include "MainWindow.h"
+#include "Configuration.h"
 #include <QTextCodec>
 #include <QFile>
+#include <QTranslator>
+#include <QTextStream>
+#include <QLibraryInfo>
 
 MyApplication::MyApplication(int & argc, char** argv)
     : QApplication(argc, argv)
@@ -9,16 +15,16 @@ MyApplication::MyApplication(int & argc, char** argv)
 }
 
 #if QT_VERSION < QT_VERSION_CHECK(5,0,0)
+bool MyApplication::winEventFilter(MSG* message, long* result)
+{
+    return DbgWinEvent(message, result);
+}
+
 bool MyApplication::globalEventFilter(void* message)
 {
     return DbgWinEventGlobal((MSG*)message);
 }
 #endif
-
-bool MyApplication::winEventFilter(MSG* message, long* result)
-{
-    return DbgWinEvent(message, result);
-}
 
 bool MyApplication::notify(QObject* receiver, QEvent* event)
 {
@@ -45,12 +51,16 @@ bool MyApplication::notify(QObject* receiver, QEvent* event)
 }
 
 static Configuration* mConfiguration;
+char currentLocale[MAX_SETTING_SIZE] = "";
+// Boom... VS does not support "thread_local"... and cannot use "__declspec(thread)" in a DLL... https://blogs.msdn.microsoft.com/oldnewthing/20101122-00/?p=12233
+// Simulating Thread Local Storage with a map...
+std::map<DWORD, TranslatedStringStorage>* TLS_TranslatedStringMap; //key = Thread Id, value = Translate Buffer
 
 static bool isValidLocale(const QString & locale)
 {
     auto allLocales = QLocale::matchingLocales(QLocale::AnyLanguage, QLocale::AnyScript, QLocale::AnyCountry);
     for(auto & l : allLocales)
-        if(l.name() == locale)
+        if(l.name() == locale || l.name().replace(QRegExp("_.+"), "") == locale)
             return true;
     return false;
 }
@@ -58,6 +68,7 @@ static bool isValidLocale(const QString & locale)
 int main(int argc, char* argv[])
 {
     qputenv("QT_AUTO_SCREEN_SCALE_FACTOR", "1");
+    QGuiApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     MyApplication application(argc, argv);
     QFile f(QString("%1/style.css").arg(QCoreApplication::applicationDirPath()));
     if(f.open(QFile::ReadOnly | QFile::Text))
@@ -70,30 +81,34 @@ int main(int argc, char* argv[])
 #if QT_VERSION < QT_VERSION_CHECK(5,0,0)
     QAbstractEventDispatcher::instance(application.thread())->setEventFilter(MyApplication::globalEventFilter);
 #else
-    x64GlobalFilter* filter = new x64GlobalFilter();
-    QAbstractEventDispatcher::instance(application.thread())->installNativeEventFilter(filter);
+    auto eventFilter = new MyEventFilter();
+    application.installNativeEventFilter(eventFilter);
 #endif
 
     // Get the hidden language setting (for testers)
-    char locale[MAX_SETTING_SIZE] = "";
-    if(!BridgeSettingGet("Engine", "Language", locale) || !isValidLocale(locale))
+    if(!BridgeSettingGet("Engine", "Language", currentLocale) || !isValidLocale(currentLocale))
     {
-        strcpy_s(locale, QLocale::system().name().toUtf8().constData());
-        BridgeSettingSet("Engine", "Language", locale);
+        QStringList uiLanguages = QLocale::system().uiLanguages();
+        QString sysLocale = uiLanguages.size() ? QLocale(uiLanguages[0]).name() : QLocale::system().name();
+        strcpy_s(currentLocale, sysLocale.toUtf8().constData());
+        BridgeSettingSet("Engine", "Language", currentLocale);
     }
 
     // Load translations for Qt
     QTranslator qtTranslator;
-    if(qtTranslator.load(QString("qt_%1").arg(locale), QLibraryInfo::location(QLibraryInfo::TranslationsPath)))
+    if(qtTranslator.load(QString("qt_%1").arg(currentLocale), QLibraryInfo::location(QLibraryInfo::TranslationsPath)))
         application.installTranslator(&qtTranslator);
 
     //x64dbg and x32dbg can share the same translation
     QTranslator x64dbgTranslator;
     auto path = QString("%1/../translations").arg(QCoreApplication::applicationDirPath());
-    if(x64dbgTranslator.load(QString("x64dbg_%1").arg(locale), path))
+    if(x64dbgTranslator.load(QString("x64dbg_%1").arg(currentLocale), path))
         application.installTranslator(&x64dbgTranslator);
 
+    TLS_TranslatedStringMap = new std::map<DWORD, TranslatedStringStorage>();
+
     // initialize capstone
+    Zydis::GlobalInitialize();
     Capstone::GlobalInitialize();
 
     // load config file + set config font
@@ -128,8 +143,8 @@ int main(int argc, char* argv[])
     const char* errormsg = DbgInit();
     if(errormsg)
     {
-        QMessageBox msg(QMessageBox::Critical, "DbgInit Error!", QString(errormsg));
-        msg.setWindowIcon(QIcon(":/icons/images/compile-error.png"));
+        QMessageBox msg(QMessageBox::Critical, QObject::tr("DbgInit Error!"), QString(errormsg));
+        msg.setWindowIcon(DIcon("compile-error.png"));
         msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
         msg.exec();
         exit(1);
@@ -138,12 +153,18 @@ int main(int argc, char* argv[])
     //execute the application
     int result = application.exec();
 #if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
-    QAbstractEventDispatcher::instance(application.thread())->removeNativeEventFilter(filter);
+    application.removeNativeEventFilter(eventFilter);
 #else
     QAbstractEventDispatcher::instance(application.thread())->setEventFilter(nullptr);
 #endif
     delete mainWindow;
     mConfiguration->save(); //save config on exit
+    {
+        //delete tls
+        auto temp = TLS_TranslatedStringMap;
+        TLS_TranslatedStringMap = nullptr;
+        delete temp;
+    }
 
     //TODO free capstone/config/bridge and prevent use after free.
 

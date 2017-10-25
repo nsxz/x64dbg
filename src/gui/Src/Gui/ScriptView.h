@@ -3,6 +3,9 @@
 
 #include "StdTable.h"
 
+class QMessageBox;
+class MRUList;
+
 class ScriptView : public StdTable
 {
     Q_OBJECT
@@ -18,7 +21,6 @@ public:
     void keyPressEvent(QKeyEvent* event);
 
 public slots:
-    void refreshShortcutsSlot();
     void contextMenuSlot(const QPoint & pos);
     void add(int count, const char** lines);
     void clear();
@@ -26,9 +28,12 @@ public slots:
     void error(int line, QString message);
     void setTitle(QString title);
     void setInfoLine(int line, QString info);
+    void openRecentFile(QString file);
     void openFile();
+    void paste();
     void reload();
     void unload();
+    void edit();
     void run();
     void bpToggle();
     void runCursor();
@@ -39,29 +44,23 @@ public slots:
     void newIp();
     void question(QString message);
     void enableHighlighting(bool enable);
+    void messageResult(int result);
+    void closeSlot();
 
 private:
     //private functions
     void setupContextMenu();
     void setSelection(int line);
-    bool isScriptCommand(QString text, QString cmd);
+    bool isScriptCommand(QString text, QString cmd, QString & mnemonic, QString & argument);
 
     //private variables
     int mIpLine;
     bool mEnableSyntaxHighlighting;
     QString filename;
 
-    QMenu* mLoadMenu;
-    QAction* mScriptLoad;
-    QAction* mScriptReload;
-    QAction* mScriptUnload;
-    QAction* mScriptRun;
-    QAction* mScriptRunCursor;
-    QAction* mScriptStep;
-    QAction* mScriptBpToggle;
-    QAction* mScriptCmdExec;
-    QAction* mScriptAbort;
-    QAction* mScriptNewIp;
+    MenuBuilder* mMenu;
+    QMessageBox* msg;
+    MRUList* mMRUList;
 };
 
 #endif // SCRIPTVIEW_H

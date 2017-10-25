@@ -5,6 +5,9 @@
 #include <QMenu>
 #include <functional>
 
+/**
+ * @brief The MenuBuilder class implements the dynamical context menu system for many views.
+ */
 class MenuBuilder : public QObject
 {
     Q_OBJECT
@@ -16,6 +19,8 @@ public:
           _callback(callback)
     {
     }
+
+    void loadFromConfig();
 
     inline void addSeparator()
     {
@@ -40,29 +45,9 @@ public:
         return menu;
     }
 
-    inline QMenu* addMenu(QMenu* submenu, BuildCallback callback)
-    {
-        addBuilder(new MenuBuilder(submenu->parent(), [submenu, callback](QMenu * menu)
-        {
-            submenu->clear();
-            if(callback(submenu))
-                menu->addMenu(submenu);
-            return true;
-        }));
-        return submenu;
-    }
+    QMenu* addMenu(QMenu* submenu, BuildCallback callback);
 
-    inline QMenu* addMenu(QMenu* submenu, MenuBuilder* builder)
-    {
-        addBuilder(new MenuBuilder(submenu->parent(), [submenu, builder](QMenu * menu)
-        {
-            submenu->clear();
-            builder->build(submenu);
-            menu->addMenu(submenu);
-            return true;
-        }));
-        return submenu;
-    }
+    QMenu* addMenu(QMenu* submenu, MenuBuilder* builder);
 
     inline MenuBuilder* addBuilder(MenuBuilder* builder)
     {
@@ -70,30 +55,18 @@ public:
         return builder;
     }
 
-    inline void build(QMenu* menu) const
+    QString getText(size_t id) const;
+
+    QString getId() const
     {
-        if(_callback && !_callback(menu))
-            return;
-        for(const Container & container : _containers)
-        {
-            switch(container.type)
-            {
-            case Container::Separator:
-                menu->addSeparator();
-                break;
-            case Container::Action:
-                menu->addAction(container.action);
-                break;
-            case Container::Menu:
-                menu->addMenu(container.menu);
-                break;
-            case Container::Builder:
-                container.builder->build(menu);
-                break;
-            default:
-                break;
-            }
-        }
+        return id;
+    }
+
+    bool build(QMenu* menu) const;
+
+    inline bool empty() const
+    {
+        return _containers.empty();
     }
 
 private:
@@ -108,7 +81,8 @@ private:
         };
 
         inline Container()
-            : type(Separator)
+            : type(Separator),
+              action(nullptr)
         {
         }
 
@@ -134,12 +108,13 @@ private:
         union
         {
             QAction* action;
-            QMenu* menu ;
+            QMenu* menu;
             MenuBuilder* builder;
         };
     };
 
     BuildCallback _callback;
+    QString id;
     std::vector<Container> _containers;
 };
 

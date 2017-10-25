@@ -2,72 +2,40 @@
 #include <QFile>
 #include <QTextStream>
 #include <QMessageBox>
+#include <QProcess>
+#include <QDir>
+#include <QDesktopServices>
 #include "Configuration.h"
 
-SourceView::SourceView(QString path, int line, StdTable* parent) : StdTable(parent)
+SourceView::SourceView(QString path, int line, QWidget* parent)
+    : ReferenceView(true, parent),
+      mIpLine(0)
 {
     mSourcePath = path;
+    mList->enableColumnSorting(false);
+    mSearchList->enableColumnSorting(false);
 
-    addColumnAt(8 + 4 * getCharWidth(), "Line", true);
-    addColumnAt(0, "Code", true);
+    addColumnAt(sizeof(duint) * 2, tr("Address"));
+    addColumnAt(6, tr("Line"));
+    addColumnAt(0, tr("Code"));
+
+    connect(this, SIGNAL(listContextMenuSignal(QMenu*)), this, SLOT(sourceContextMenu(QMenu*)));
 
     loadFile();
-    setInstructionPointer(line);
+    setSelection(line);
+    auto cip = DbgValFromString("cip");
+    mList->disassembleAtSlot(0, cip);
+    mSearchList->disassembleAtSlot(0, cip);
 
-    connect(this, SIGNAL(contextMenuSignal(QPoint)), this, SLOT(contextMenuSlot(QPoint)));
-    setupContextMenu();
-}
-
-void SourceView::contextMenuSlot(const QPoint & pos)
-{
-    QMenu wMenu(this);
-
-    int line = getInitialSelection() + 1;
-    dsint addr = DbgFunctions()->GetAddrFromLine(mSourcePath.toUtf8().constData(), line);
-    if(addr)
-        wMenu.addAction(mFollowInDisasm);
-
-    wMenu.exec(mapToGlobal(pos));
-}
-
-void SourceView::setupContextMenu()
-{
-    mFollowInDisasm = new QAction("Follow in &Disassembler", this);
-    connect(mFollowInDisasm, SIGNAL(triggered()), this, SLOT(followInDisasmSlot()));
+    mMenuBuilder = new MenuBuilder(this);
+    mMenuBuilder->addAction(makeAction(tr("Open source file"), SLOT(openSourceFileSlot())));
+    mMenuBuilder->addAction(makeAction(tr("Show source file in directory"), SLOT(showInDirectorySlot())));
+    mMenuBuilder->loadFromConfig();
 }
 
 void SourceView::setSelection(int line)
 {
-    int offset = line - 1;
-    if(isValidIndex(offset, 0))
-    {
-        int rangefrom = getTableOffset();
-        int rangeto = rangefrom + getViewableRowsCount() - 1;
-        if(offset < rangefrom) //ip lays before the current view
-            setTableOffset(offset);
-        else if(offset > (rangeto - 1)) //ip lays after the current view
-            setTableOffset(offset - getViewableRowsCount() + 2);
-        setSingleSelection(offset);
-    }
-    reloadData(); //repaint
-}
-
-void SourceView::setInstructionPointer(int line)
-{
-    int offset = line - 1;
-    if(!isValidIndex(offset, 0))
-    {
-        mIpLine = 0;
-        return;
-    }
-    mIpLine = line;
-    int rangefrom = getTableOffset();
-    int rangeto = rangefrom + getViewableRowsCount() - 1;
-    if(offset < rangefrom) //ip lays before the current view
-        setTableOffset(offset);
-    else if(offset > (rangeto - 1)) //ip lays after the current view
-        setTableOffset(offset - getViewableRowsCount() + 2);
-    setSingleSelection(offset);
+    mCurList->scrollSelect(line - 1);
     reloadData(); //repaint
 }
 
@@ -89,52 +57,33 @@ void SourceView::loadFile()
     {
         QString line = in.readLine().replace('\t', "    "); //replace tabs with four spaces
         setRowCount(lineNum + 1);
-        setCellContent(lineNum, 0, QString().sprintf("%04d", lineNum + 1));
-        setCellContent(lineNum, 1, line);
+        duint displacement = 0;
+        duint addr = DbgFunctions()->GetAddrFromLine(mSourcePath.toUtf8().constData(), lineNum + 1, &displacement);
+        if(addr && !displacement)
+            setCellContent(lineNum, 0, ToPtrString(addr));
+        setCellContent(lineNum, 1, QString("%1").arg(lineNum + 1));
+        setCellContent(lineNum, 2, line);
         lineNum++;
     }
     reloadData();
     file.close();
 }
 
-QString SourceView::paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h)
+void SourceView::sourceContextMenu(QMenu* menu)
 {
-    painter->save();
-    bool wIsSelected = isSelected(rowBase, rowOffset);
-    // Highlight if selected
-    if(wIsSelected)
-        painter->fillRect(QRect(x, y, w, h), QBrush(selectionColor)); //ScriptViewSelectionColor
-    QString returnString;
-    int line = rowBase + rowOffset + 1;
-    switch(col)
-    {
-    case 0: //line number
-    {
-        if(line == mIpLine) //IP
-        {
-            painter->fillRect(QRect(x, y, w, h), QBrush(ConfigColor("DisassemblyCipBackgroundColor")));
-            painter->setPen(QPen(ConfigColor("DisassemblyCipColor"))); //white address (ScriptViewIpTextColor)
-        }
-        else
-            painter->setPen(QPen(this->textColor));
-        painter->drawText(QRect(x + 4, y , w - 4 , h), Qt::AlignVCenter | Qt::AlignLeft, QString().sprintf("%04d", line));
-    }
-    break;
-
-    case 1: //command
-    {
-        returnString = getCellContent(rowBase + rowOffset, col); //TODO: simple keyword/regex-based syntax highlighting
-    }
-    break;
-    }
-    painter->restore();
-    return returnString;
+    menu->addSeparator();
+    mMenuBuilder->build(menu);
 }
 
-void SourceView::followInDisasmSlot()
+void SourceView::openSourceFileSlot()
 {
-    int line = getInitialSelection() + 1;
-    dsint addr = DbgFunctions()->GetAddrFromLine(mSourcePath.toUtf8().constData(), line);
-    DbgCmdExecDirect(QString().sprintf("disasm %p", addr).toUtf8().constData());
-    emit showCpu();
+    QDesktopServices::openUrl(QUrl::fromLocalFile(mSourcePath));
+}
+
+void SourceView::showInDirectorySlot()
+{
+    QStringList args;
+    args << "/select," << QDir::toNativeSeparators(mSourcePath);
+    auto process = new QProcess(this);
+    process->start("explorer.exe", args);
 }

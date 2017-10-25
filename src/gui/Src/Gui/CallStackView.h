@@ -10,21 +10,16 @@ public:
     explicit CallStackView(StdTable* parent = 0);
     void setupContextMenu();
 
-signals:
-    void showCpu();
-
 protected slots:
     void updateCallStack();
     void contextMenuSlot(const QPoint pos);
-    void doubleClickedSlot();
     void followAddress();
     void followTo();
     void followFrom();
+    void showSuspectedCallStack();
 
 private:
-    QAction* mFollowAddress;
-    QAction* mFollowTo;
-    QAction* mFollowFrom;
+    MenuBuilder* mMenuBuilder;
 };
 
 #endif // CALLSTACKVIEW_H

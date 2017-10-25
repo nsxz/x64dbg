@@ -6,6 +6,7 @@
 
 #include "variable.h"
 #include "threading.h"
+#include <map>
 
 /**
 \brief The container that stores all variables.
@@ -43,15 +44,10 @@ bool varset(const char* Name, VAR_VALUE* Value, bool ReadOnly)
         name_ = "$";
     name_ += Name;
     auto found = variables.find(name_);
-    if(found == variables.end())  //not found
+    if(found == variables.end()) //not found
         return false;
     if(found->second.alias.length())
-    {
-        // Release the lock (potential deadlock here)
-        EXCLUSIVE_RELEASE();
-
         return varset(found->second.alias.c_str(), Value, ReadOnly);
-    }
 
     if(!ReadOnly && (found->second.type == VAR_READONLY || found->second.type == VAR_HIDDEN))
         return false;
@@ -72,6 +68,8 @@ void varinit()
     varnew("$result2\1$res2", 0, VAR_SYSTEM);
     varnew("$result3\1$res3", 0, VAR_SYSTEM);
     varnew("$result4\1$res4", 0, VAR_SYSTEM);
+    varnew("$__disasm_refindex", 0, VAR_SYSTEM);
+    varnew("$__dump_refindex", 0, VAR_SYSTEM);
 
     // InitDebug variables
     varnew("$hProcess\1$hp", 0, VAR_READONLY);  // Process handle
@@ -79,6 +77,17 @@ void varinit()
 
     // Hidden variables
     varnew("$ans\1$an", 0, VAR_HIDDEN);
+
+    // Breakpoint variables
+    varnew("$breakpointcounter", 0, VAR_READONLY);
+    varnew("$breakpointcondition", 0, VAR_SYSTEM);
+    varnew("$breakpointlogcondition", 0, VAR_READONLY);
+
+    // Tracing variables
+    varnew("$tracecounter", 0, VAR_READONLY);
+    varnew("$tracecondition", 0, VAR_SYSTEM);
+    varnew("$tracelogcondition", 0, VAR_READONLY);
+    varnew("$traceswitchcondition", 0, VAR_SYSTEM);
 
     // Read-only variables
     varnew("$lastalloc", 0, VAR_READONLY);  // Last memory allocation
@@ -125,11 +134,17 @@ bool varnew(const char* Name, duint Value, VAR_TYPE Type)
     {
         String name_;
         Name = names.at(i).c_str();
-        if(*Name != '$')
+        if(*Name == '$')
+        {
+            name_ = Name;
+        }
+        else
+        {
             name_ = "$";
-        name_ += Name;
+            name_ += Name;
+        }
         if(!i)
-            firstName = Name;
+            firstName = name_;
         if(variables.find(name_) != variables.end()) //found
             return false;
         VAR var;
@@ -158,19 +173,20 @@ bool varget(const char* Name, VAR_VALUE* Value, int* Size, VAR_TYPE* Type)
     SHARED_ACQUIRE(LockVariables);
 
     String name_;
-    if(*Name != '$')
+    if(*Name == '$')
+    {
+        name_ = Name;
+    }
+    else
+    {
         name_ = "$";
-    name_ += Name;
+        name_ += Name;
+    }
     auto found = variables.find(name_);
     if(found == variables.end()) //not found
         return false;
     if(found->second.alias.length())
-    {
-        // Release the lock (potential deadlock here)
-        SHARED_RELEASE();
-
         return varget(found->second.alias.c_str(), Value, Size, Type);
-    }
     if(Type)
         *Type = found->second.type;
     if(Size)
@@ -224,7 +240,7 @@ bool varget(const char* Name, char* String, int* Size, VAR_TYPE* Type)
     if(Type)
         *Type = vartype;
     if(String)
-        memcpy(String, varvalue.u.data->data(), varsize);
+        memcpy(String, varvalue.u.data->data(), Size ? min(*Size, varsize) : varsize);
     return true;
 }
 
@@ -305,12 +321,15 @@ bool vardel(const char* Name, bool DelSystem)
     if(!DelSystem && found->second.type != VAR_USER)
         return false;
     found = variables.begin();
+    String NameString(Name);
     while(found != variables.end())
     {
-        auto del = found;
-        found++;
-        if(found->second.name == String(Name))
-            variables.erase(del);
+        if(found->first == NameString || found->second.alias == NameString)
+        {
+            found = variables.erase(found); // Invalidate iterators
+        }
+        else
+            found++;
     }
     return true;
 }

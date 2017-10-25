@@ -1,6 +1,7 @@
 #include "EditBreakpointDialog.h"
 #include "ui_EditBreakpointDialog.h"
 #include "StringUtil.h"
+#include "MiscUtil.h"
 
 EditBreakpointDialog::EditBreakpointDialog(QWidget* parent, const BRIDGEBP & bp)
     : QDialog(parent),
@@ -9,14 +10,23 @@ EditBreakpointDialog::EditBreakpointDialog(QWidget* parent, const BRIDGEBP & bp)
 {
     ui->setupUi(this);
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
-    setFixedSize(this->size()); //fixed size
-    setWindowTitle(QString("Edit Breakpoint %1").arg(ToHexString(bp.addr)));
-    setWindowIcon(QIcon(":/icons/images/breakpoint.png"));
+    if(bp.type == bp_dll)
+    {
+        setWindowTitle(QString(tr("Edit Breakpoint %1")).arg(QString(bp.mod)));
+    }
+    else
+    {
+        setWindowTitle(QString(tr("Edit Breakpoint %1")).arg(getSymbolicName(bp.addr)));
+    }
+    setWindowIcon(DIcon("breakpoint.png"));
     loadFromBp();
+
+    Config()->setupWindowPos(this);
 }
 
 EditBreakpointDialog::~EditBreakpointDialog()
 {
+    Config()->saveWindowPos(this);
     delete ui;
 }
 
@@ -26,6 +36,8 @@ void EditBreakpointDialog::loadFromBp()
     ui->spinHitCount->setValue(mBp.hitCount);
     ui->editBreakCondition->setText(mBp.breakCondition);
     ui->checkBoxFastResume->setChecked(mBp.fastResume);
+    ui->checkBoxSilent->setChecked(mBp.silent);
+    ui->checkBoxSingleshoot->setChecked(mBp.singleshoot);
     ui->editLogText->setText(mBp.logText);
     ui->editLogCondition->setText(mBp.logCondition);
     ui->editCommandText->setText(mBp.commandText);
@@ -33,9 +45,11 @@ void EditBreakpointDialog::loadFromBp()
 }
 
 template<typename T>
-void copyTruncate(T dest, const QString & src)
+void copyTruncate(T & dest, QString src)
 {
-    strcpy_s(dest, _TRUNCATE, src.toUtf8().constData());
+    src.replace(QChar('\\'), QString("\\\\"));
+    src.replace(QChar('"'), QString("\\\""));
+    strncpy_s(dest, src.toUtf8().constData(), _TRUNCATE);
 }
 
 void EditBreakpointDialog::on_editName_textEdited(const QString & arg1)
@@ -50,6 +64,7 @@ void EditBreakpointDialog::on_editBreakCondition_textEdited(const QString & arg1
 
 void EditBreakpointDialog::on_editLogText_textEdited(const QString & arg1)
 {
+    ui->checkBoxSilent->setChecked(true);
     copyTruncate(mBp.logText, arg1);
 }
 
@@ -76,4 +91,14 @@ void EditBreakpointDialog::on_checkBoxFastResume_toggled(bool checked)
 void EditBreakpointDialog::on_spinHitCount_valueChanged(int arg1)
 {
     mBp.hitCount = arg1;
+}
+
+void EditBreakpointDialog::on_checkBoxSilent_toggled(bool checked)
+{
+    mBp.silent = checked;
+}
+
+void EditBreakpointDialog::on_checkBoxSingleshoot_toggled(bool checked)
+{
+    mBp.singleshoot = checked;
 }

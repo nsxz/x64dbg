@@ -24,6 +24,12 @@
 #include "handles.h"
 #include "../bridge/bridgelist.h"
 #include "tcpconnections.h"
+#include "watch.h"
+#include "animate.h"
+#include "thread.h"
+#include "comment.h"
+#include "exception.h"
+#include "database.h"
 
 static DBGFUNCTIONS _dbgfunctions;
 
@@ -46,7 +52,7 @@ static bool _sectionfromaddr(duint addr, char* section)
         {
             if(addr >= cur.addr && addr < cur.addr + (cur.size + (0x1000 - 1) & ~(0x1000 - 1)))
             {
-                strcpy_s(section, MAX_SECTION_SIZE, cur.name);
+                strncpy_s(section, MAX_SECTION_SIZE * 5, cur.name, _TRUNCATE);
                 return true;
             }
         }
@@ -130,7 +136,7 @@ static bool _getcmdline(char* cmd_line, size_t* cbsize)
     if(!cmd_line && cbsize)
         *cbsize = strlen(cmdline) + sizeof(char);
     else if(cmd_line)
-        strcpy(cmd_line, cmdline);
+        memcpy(cmd_line, cmdline, strlen(cmdline) + 1);
     efree(cmdline, "_getcmdline:cmdline");
     return true;
 }
@@ -152,8 +158,8 @@ static bool _getjit(char* jit, bool jit64)
     }
     else // if jit input == NULL: it returns false if there are not an OLD JIT STORED.
     {
-        char oldjit[MAX_SETTING_SIZE] = "";
-        if(!BridgeSettingGet("JIT", "Old", (char*) & oldjit))
+        Memory<char*> oldjit(MAX_SETTING_SIZE + 1);
+        if(!BridgeSettingGet("JIT", "Old", oldjit()))
             return false;
     }
 
@@ -162,17 +168,21 @@ static bool _getjit(char* jit, bool jit64)
 
 bool _getprocesslist(DBGPROCESSINFO** entries, int* count)
 {
-    std::vector<PROCESSENTRY32> list;
-    if(!dbglistprocesses(&list))
+    std::vector<PROCESSENTRY32> infoList;
+    std::vector<std::string> commandList;
+    std::vector<std::string> winTextList;
+    if(!dbglistprocesses(&infoList, &commandList, &winTextList))
         return false;
-    *count = (int)list.size();
+    *count = (int)infoList.size();
     if(!*count)
         return false;
     *entries = (DBGPROCESSINFO*)BridgeAlloc(*count * sizeof(DBGPROCESSINFO));
     for(int i = 0; i < *count; i++)
     {
-        (*entries)[*count - i - 1].dwProcessId = list.at(i).th32ProcessID;
-        strcpy_s((*entries)[*count - i - 1].szExeFile, list.at(i).szExeFile);
+        (*entries)[*count - i - 1].dwProcessId = infoList.at(i).th32ProcessID;
+        strncpy_s((*entries)[*count - i - 1].szExeFile, infoList.at(i).szExeFile, _TRUNCATE);
+        strncpy_s((*entries)[*count - i - 1].szExeMainWindowTitle, winTextList.at(i).c_str(), _TRUNCATE);
+        strncpy_s((*entries)[*count - i - 1].szExeArgs, commandList.at(i).c_str(), _TRUNCATE);
     }
     return true;
 }
@@ -183,7 +193,7 @@ static void _memupdatemap()
     GuiUpdateMemoryView();
 }
 
-static duint _getaddrfromline(const char* szSourceFile, int line)
+static duint _getaddrfromline(const char* szSourceFile, int line, duint* disp)
 {
     LONG displacement = 0;
     IMAGEHLP_LINE64 lineData;
@@ -191,6 +201,8 @@ static duint _getaddrfromline(const char* szSourceFile, int line)
     lineData.SizeOfStruct = sizeof(lineData);
     if(!SymGetLineFromName64(fdProcessInfo->hProcess, NULL, szSourceFile, line, &displacement, &lineData))
         return 0;
+    if(disp)
+        *disp = displacement;
     return (duint)lineData.Address;
 }
 
@@ -225,6 +237,13 @@ static bool _getbridgebp(BPXTYPE type, duint addr, BRIDGEBP* bp)
     case bp_memory:
         bptype = BPMEMORY;
         break;
+    case bp_dll:
+        bptype = BPDLL;
+        addr = ModHashFromName(reinterpret_cast<const char*>(addr));
+        break;
+    case bp_exception:
+        bptype = BPEXCEPTION;
+        break;
     default:
         return false;
     }
@@ -244,7 +263,7 @@ static bool _stringformatinline(const char* format, size_t resultSize, char* res
 {
     if(!format || !result)
         return false;
-    strcpy_s(result, resultSize, stringformatinline(format).c_str());
+    strncpy_s(result, resultSize, stringformatinline(format).c_str(), _TRUNCATE);
     return true;
 }
 
@@ -252,7 +271,7 @@ static void _getmnemonicbrief(const char* mnem, size_t resultSize, char* result)
 {
     if(!result)
         return;
-    strcpy_s(result, resultSize, MnemonicHelp::getBriefDescription(mnem).c_str());
+    strncpy_s(result, resultSize, MnemonicHelp::getBriefDescription(mnem).c_str(), _TRUNCATE);
 }
 
 static bool _enumhandles(ListOf(HANDLEINFO) handles)
@@ -282,6 +301,75 @@ static bool _enumtcpconnections(ListOf(TCPCONNECTIONINFO) connections)
     return BridgeList<TCPCONNECTIONINFO>::CopyData(connections, connectionsV);
 }
 
+static bool _enumwindows(ListOf(WINDOW_INFO) windows)
+{
+    std::vector<WINDOW_INFO> windowInfoV;
+    if(!HandlesEnumWindows(windowInfoV))
+        return false;
+    return BridgeList<WINDOW_INFO>::CopyData(windows, windowInfoV);
+}
+
+static bool _enumheaps(ListOf(HEAPINFO) heaps)
+{
+    std::vector<HEAPINFO> heapInfoV;
+    if(!HandlesEnumHeaps(heapInfoV))
+        return false;
+    return BridgeList<HEAPINFO>::CopyData(heaps, heapInfoV);
+}
+
+static void _getcallstackex(DBGCALLSTACK* callstack, bool cache)
+{
+    auto csp = GetContextDataEx(hActiveThread, UE_CSP);
+    if(!cache)
+        stackupdatecallstack(csp);
+    stackgetcallstack(csp, (CALLSTACK*)callstack);
+}
+
+static void _enumconstants(ListOf(CONSTANTINFO) constants)
+{
+    auto constantsV = ConstantList();
+    BridgeList<CONSTANTINFO>::CopyData(constants, constantsV);
+}
+
+static void _enumerrorcodes(ListOf(CONSTANTINFO) errorcodes)
+{
+    auto errorcodesV = ErrorCodeList();
+    BridgeList<CONSTANTINFO>::CopyData(errorcodes, errorcodesV);
+}
+
+static void _enumexceptions(ListOf(CONSTANTINFO) exceptions)
+{
+    auto exceptionsV = ExceptionList();
+    BridgeList<CONSTANTINFO>::CopyData(exceptions, exceptionsV);
+}
+
+static duint _membpsize(duint addr)
+{
+    SHARED_ACQUIRE(LockBreakpoints);
+    auto info = BpInfoFromAddr(BPMEMORY, addr);
+    return info ? info->memsize : 0;
+}
+
+static bool _modrelocationsfromaddr(duint addr, ListOf(DBGRELOCATIONINFO) relocations)
+{
+    std::vector<MODRELOCATIONINFO> infos;
+    if(!ModRelocationsFromAddr(addr, infos))
+        return false;
+
+    BridgeList<MODRELOCATIONINFO>::CopyData(relocations, infos);
+    return true;
+}
+
+static bool _modrelocationsinrange(duint addr, duint size, ListOf(DBGRELOCATIONINFO) relocations)
+{
+    std::vector<MODRELOCATIONINFO> infos;
+    if(!ModRelocationsInRange(addr, size, infos))
+        return false;
+
+    BridgeList<MODRELOCATIONINFO>::CopyData(relocations, infos);
+    return true;
+}
+
 void dbgfunctionsinit()
 {
     _dbgfunctions.AssembleAtEx = _assembleatex;
@@ -290,6 +378,9 @@ void dbgfunctionsinit()
     _dbgfunctions.ModBaseFromAddr = ModBaseFromAddr;
     _dbgfunctions.ModBaseFromName = ModBaseFromName;
     _dbgfunctions.ModSizeFromAddr = ModSizeFromAddr;
+    _dbgfunctions.ModGetParty = ModGetParty;
+    _dbgfunctions.ModSetParty = ModSetParty;
+    _dbgfunctions.WatchIsWatchdogTriggered = WatchIsWatchdogTriggered;
     _dbgfunctions.Assemble = assemble;
     _dbgfunctions.PatchGet = _patchget;
     _dbgfunctions.PatchInRange = _patchinrange;
@@ -331,4 +422,23 @@ void dbgfunctionsinit()
     _dbgfunctions.EnumHandles = _enumhandles;
     _dbgfunctions.GetHandleName = _gethandlename;
     _dbgfunctions.EnumTcpConnections = _enumtcpconnections;
+    _dbgfunctions.GetDbgEvents = dbggetdbgevents;
+    _dbgfunctions.MemIsCodePage = MemIsCodePage;
+    _dbgfunctions.AnimateCommand = _dbg_animatecommand;
+    _dbgfunctions.DbgSetDebuggeeInitScript = dbgsetdebuggeeinitscript;
+    _dbgfunctions.DbgGetDebuggeeInitScript = dbggetdebuggeeinitscript;
+    _dbgfunctions.EnumWindows = _enumwindows;
+    _dbgfunctions.EnumHeaps = _enumheaps;
+    _dbgfunctions.ThreadGetName = ThreadGetName;
+    _dbgfunctions.IsDepEnabled = dbgisdepenabled;
+    _dbgfunctions.GetCallStackEx = _getcallstackex;
+    _dbgfunctions.GetUserComment = CommentGet;
+    _dbgfunctions.EnumConstants = _enumconstants;
+    _dbgfunctions.EnumErrorCodes = _enumerrorcodes;
+    _dbgfunctions.EnumExceptions = _enumexceptions;
+    _dbgfunctions.MemBpSize = _membpsize;
+    _dbgfunctions.ModRelocationsFromAddr = _modrelocationsfromaddr;
+    _dbgfunctions.ModRelocationAtAddr = (MODRELOCATIONATADDR)ModRelocationAtAddr;
+    _dbgfunctions.ModRelocationsInRange = _modrelocationsinrange;
+    _dbgfunctions.DbGetHash = DbGetHash;
 }

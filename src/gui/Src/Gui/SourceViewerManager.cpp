@@ -10,32 +10,30 @@ SourceViewerManager::SourceViewerManager(QWidget* parent) : QTabWidget(parent)
 
     //Close All Tabs
     mCloseAllTabs = new QPushButton(this);
-    mCloseAllTabs->setIcon(QIcon(":/icons/images/close-all-tabs.png"));
-    mCloseAllTabs->setToolTip("Close All Tabs");
+    mCloseAllTabs->setIcon(DIcon("close-all-tabs.png"));
+    mCloseAllTabs->setToolTip(tr("Close All Tabs"));
     connect(mCloseAllTabs, SIGNAL(clicked()), this, SLOT(closeAllTabs()));
     setCornerWidget(mCloseAllTabs, Qt::TopLeftCorner);
 
     connect(this, SIGNAL(tabCloseRequested(int)), this, SLOT(closeTab(int)));
     connect(Bridge::getBridge(), SIGNAL(loadSourceFile(QString, int, int)), this, SLOT(loadSourceFile(QString, int, int)));
+    connect(Bridge::getBridge(), SIGNAL(dbgStateChanged(DBGSTATE)), this, SLOT(dbgStateChanged(DBGSTATE)));
 }
 
 void SourceViewerManager::loadSourceFile(QString path, int line, int selection)
 {
-    if(!selection)
-    {
-        for(int i = 0; i < count(); i++) //remove all other instruction pointers (only one is possible)
-            ((SourceView*)this->widget(i))->setInstructionPointer(0);
-    }
+    if(!line)
+        line = selection;
     for(int i = 0; i < count(); i++)
     {
         SourceView* curView = (SourceView*)this->widget(i);
         if(curView->getSourcePath().compare(path, Qt::CaseInsensitive) == 0) //file already loaded
         {
-            if(selection)
-                curView->setSelection(selection);
-            else
-                curView->setInstructionPointer(line);
+            QWidget* now = QApplication::focusWidget();
+            curView->setSelection(line);
             setCurrentIndex(i); //show that loaded tab
+            if(now)
+                now->setFocus();
             return;
         }
     }
@@ -49,13 +47,8 @@ void SourceViewerManager::loadSourceFile(QString path, int line, int selection)
     int idx = path.lastIndexOf(QDir::separator());
     if(idx != -1)
         title = path.mid(idx + 1);
-    SourceView* newView = new SourceView(path, line);
+    SourceView* newView = new SourceView(path, line, this);
     connect(newView, SIGNAL(showCpu()), this, SIGNAL(showCpu()));
-    if(selection)
-    {
-        newView->setInstructionPointer(0);
-        newView->setSelection(selection);
-    }
     addTab(newView, title);
     setCurrentIndex(count() - 1);
 }
@@ -68,4 +61,10 @@ void SourceViewerManager::closeTab(int index)
 void SourceViewerManager::closeAllTabs()
 {
     clear();
+}
+
+void SourceViewerManager::dbgStateChanged(DBGSTATE state)
+{
+    if(state == stopped)
+        closeAllTabs();
 }

@@ -16,6 +16,7 @@ CPUArgumentWidget::CPUArgumentWidget(QWidget* parent) :
     setupTable();
     loadConfig();
     refreshData();
+    ui->checkBoxLock->setToolTip(tr("Refresh is automatic."));
 
     mFollowDisasm = new QAction(this);
     connect(mFollowDisasm, SIGNAL(triggered()), this, SLOT(followDisasmSlot()));
@@ -38,6 +39,12 @@ CPUArgumentWidget::~CPUArgumentWidget()
     delete ui;
 }
 
+void CPUArgumentWidget::updateStackOffset(bool iscall)
+{
+    const auto & cur = mCallingConventions[mCurrentCallingConvention];
+    mStackOffset = cur.getStackOffset() + (iscall ? 0 : cur.getCallOffset());
+}
+
 void CPUArgumentWidget::disassembledAtSlot(dsint, dsint cip, bool, dsint)
 {
     if(mCurrentCallingConvention == -1) //no calling conventions
@@ -46,12 +53,9 @@ void CPUArgumentWidget::disassembledAtSlot(dsint, dsint cip, bool, dsint)
         mTable->reloadData();
         return;
     }
-
     BASIC_INSTRUCTION_INFO disasm;
     DbgDisasmFastAt(cip, &disasm);
-
-    const auto & cur = mCallingConventions[mCurrentCallingConvention];
-    mStackOffset = disasm.call ? 0 : cur.getCallOffset();
+    updateStackOffset(disasm.call);
     if(ui->checkBoxLock->checkState() == Qt::PartiallyChecked) //Calls
     {
         mAllowUpdate = disasm.call;
@@ -63,12 +67,11 @@ void CPUArgumentWidget::disassembledAtSlot(dsint, dsint cip, bool, dsint)
 static QString stringFormatInline(const QString & format)
 {
     if(!DbgFunctions()->StringFormatInline)
-        return "";
+        return QString();
     char result[MAX_SETTING_SIZE] = "";
     if(DbgFunctions()->StringFormatInline(format.toUtf8().constData(), MAX_SETTING_SIZE, result))
         return result;
-    return "[Formatting Error]";
-
+    return CPUArgumentWidget::tr("[Formatting Error]");
 }
 
 void CPUArgumentWidget::refreshData()
@@ -76,7 +79,7 @@ void CPUArgumentWidget::refreshData()
     if(!mAllowUpdate) //view is locked
         return;
 
-    if(mCurrentCallingConvention == -1) //no calling conventions
+    if(mCurrentCallingConvention == -1 || !DbgIsDebugging()) //no calling conventions
     {
         mTable->setRowCount(0);
         mTable->reloadData();
@@ -115,46 +118,52 @@ void CPUArgumentWidget::refreshData()
     mTable->reloadData();
 }
 
+static void configAction(QMenu & wMenu, const QIcon & icon, QAction* action, const QString & value, const QString & name)
+{
+    action->setText(QApplication::translate("CPUArgumentWidget", "Follow %1 in %2").arg(value).arg(name));
+    action->setIcon(icon);
+    action->setObjectName(value);
+    wMenu.addAction(action);
+}
+
 void CPUArgumentWidget::contextMenuSlot(QPoint pos)
 {
+    if(!DbgIsDebugging())
+        return;
     auto selection = mTable->getInitialSelection();
     if(int(mArgumentValues.size()) <= selection)
         return;
     auto value = mArgumentValues[selection];
-    if(!DbgMemIsValidReadPtr(value))
-        return;
-    duint valueAddr;
-    DbgMemRead(value, (unsigned char*)&valueAddr, sizeof(valueAddr));
-
     QMenu wMenu(this);
-    auto valueText = ToHexString(value);
-    auto valueAddrText = QString("[%1]").arg(valueText);
-    auto configAction = [&](QAction * action, const QString & value, const QString & name)
+    if(DbgMemIsValidReadPtr(value))
     {
-        action->setText(tr("Follow %1 in %2").arg(value).arg(name));
-        action->setObjectName(value);
-        wMenu.addAction(action);
-    };
-    auto inStackRange = [](duint addr)
-    {
-        auto csp = DbgValFromString("csp");
-        duint size;
-        auto base = DbgMemFindBaseAddr(csp, &size);
-        return addr >= base && addr < base + size;
-    };
+        duint valueAddr;
+        DbgMemRead(value, (unsigned char*)&valueAddr, sizeof(valueAddr));
 
-    configAction(mFollowDisasm, valueText, tr("Disassembler"));
-    configAction(mFollowDump, valueText, tr("Dump"));
-    if(inStackRange(value))
-        configAction(mFollowStack, valueText, tr("Stack"));
-    if(DbgMemIsValidReadPtr(valueAddr))
-    {
-        configAction(mFollowAddrDisasm, valueAddrText, tr("Disassembler"));
-        configAction(mFollowDump, valueAddrText, tr("Dump"));
-        if(inStackRange(valueAddr))
-            configAction(mFollowAddrStack, valueAddrText, tr("Stack"));
+        auto valueText = ToHexString(value);
+        auto valueAddrText = QString("[%1]").arg(valueText);
+        auto inStackRange = [](duint addr)
+        {
+            auto csp = DbgValFromString("csp");
+            duint size;
+            auto base = DbgMemFindBaseAddr(csp, &size);
+            return addr >= base && addr < base + size;
+        };
+
+        configAction(wMenu, DIcon(ArchValue("processor32.png", "processor64.png")), mFollowDisasm, valueText, tr("Disassembler"));
+        configAction(wMenu, DIcon("dump.png"), mFollowDump, valueText, tr("Dump"));
+        if(inStackRange(value))
+            configAction(wMenu, DIcon("stack.png"), mFollowStack, valueText, tr("Stack"));
+        if(DbgMemIsValidReadPtr(valueAddr))
+        {
+            configAction(wMenu, DIcon(ArchValue("processor32.png", "processor64.png")), mFollowAddrDisasm, valueAddrText, tr("Disassembler"));
+            configAction(wMenu, DIcon("dump.png"), mFollowDump, valueAddrText, tr("Dump"));
+            if(inStackRange(valueAddr))
+                configAction(wMenu, DIcon("stack.png"), mFollowAddrStack, valueAddrText, tr("Stack"));
+        }
     }
     QMenu wCopyMenu(tr("&Copy"));
+    wCopyMenu.setIcon(DIcon("copy.png"));
     mTable->setupCopyMenu(&wCopyMenu);
     if(wCopyMenu.actions().length())
     {
@@ -201,12 +210,17 @@ void CPUArgumentWidget::loadConfig()
     CallingConvention x32(tr("Default (stdcall)"), 5);
     mCallingConventions.push_back(x32);
 
-    CallingConvention x32ebp(tr("Default (stdcall, EBP stack)"), 5, "ebp");
+    CallingConvention x32ebp(tr("Default (stdcall, EBP stack)"), 5, "ebp", 8, 0);
     mCallingConventions.push_back(x32ebp);
 
     CallingConvention thiscall(tr("thiscall"), 4);
     thiscall.addArgument(Argument("this", "ecx", ""));
     mCallingConventions.push_back(thiscall);
+
+    CallingConvention fastcall(tr("fastcall"), 3);
+    fastcall.addArgument(Argument("", "ecx", ""));
+    fastcall.addArgument(Argument("", "edx", ""));
+    mCallingConventions.push_back(fastcall);
 
     CallingConvention delphi(tr("Delphi (Borland fastcall)"), 2);
     delphi.addArgument(Argument("", "eax", ""));
@@ -235,6 +249,11 @@ void CPUArgumentWidget::on_comboCallingConvention_currentIndexChanged(int index)
     mCurrentCallingConvention = index;
     const auto & cur = mCallingConventions[index];
     ui->spinArgCount->setValue(int(cur.arguments.size()) + cur.stackArgCount); //set the default argument count
+    if(!DbgIsDebugging())
+        return;
+    BASIC_INSTRUCTION_INFO disasm;
+    DbgDisasmFastAt(DbgValFromString("CIP"), &disasm);
+    updateStackOffset(disasm.call);
     refreshData();
 }
 
@@ -248,22 +267,25 @@ void CPUArgumentWidget::on_checkBoxLock_stateChanged(int)
 {
     switch(ui->checkBoxLock->checkState())
     {
-    case Qt::Checked:
+    case Qt::Checked: //Locked, update disabled.
         refreshData(); //first refresh then lock
         ui->checkBoxLock->setText(tr("Locked"));
+        ui->checkBoxLock->setToolTip(tr("Refresh is disabled."));
         ui->spinArgCount->setEnabled(false);
         ui->comboCallingConvention->setEnabled(false);
         mAllowUpdate = false;
         break;
-    case Qt::PartiallyChecked:
+    case Qt::PartiallyChecked://Locked, but still update when a call is encountered.
         refreshData(); //first refresh then lock
         ui->checkBoxLock->setText(tr("Calls"));
+        ui->checkBoxLock->setToolTip(tr("Refresh is only done when executing a CALL instruction."));
         ui->spinArgCount->setEnabled(false);
         ui->comboCallingConvention->setEnabled(false);
         mAllowUpdate = false;
         break;
-    case Qt::Unchecked:
+    case Qt::Unchecked://Unlocked, update enabled
         ui->checkBoxLock->setText(tr("Unlocked"));
+        ui->checkBoxLock->setToolTip(tr("Refresh is automatic."));
         ui->spinArgCount->setEnabled(true);
         ui->comboCallingConvention->setEnabled(true);
         mAllowUpdate = true;

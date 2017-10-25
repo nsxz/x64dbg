@@ -2,11 +2,11 @@
 #define CPUDUMP_H
 
 #include "HexDump.h"
-#include "GotoDialog.h"
-#include "CPUDisassembly.h"
 
 //forward declaration
 class CPUMultiDump;
+class CPUDisassembly;
+class GotoDialog;
 
 class CPUDump : public HexDump
 {
@@ -24,7 +24,6 @@ signals:
     void displayReferencesWidget();
 
 public slots:
-    void refreshShortcutsSlot();
     void memoryAccessSingleshootSlot();
     void memoryAccessRestoreSlot();
     void memoryWriteSingleshootSlot();
@@ -49,18 +48,24 @@ public slots:
     void gotoFileOffsetSlot();
     void gotoStartSlot();
     void gotoEndSlot();
+    void gotoPreviousReferenceSlot();
+    void gotoNextReferenceSlot();
 
     void hexAsciiSlot();
     void hexUnicodeSlot();
     void hexCodepageSlot();
+    void hexLastCodepageSlot();
 
     void textAsciiSlot();
     void textUnicodeSlot();
     void textCodepageSlot();
+    void textLastCodepageSlot();
 
+    void integerSignedByteSlot();
     void integerSignedShortSlot();
     void integerSignedLongSlot();
     void integerSignedLongLongSlot();
+    void integerUnsignedByteSlot();
     void integerUnsignedShortSlot();
     void integerUnsignedLongSlot();
     void integerUnsignedLongLongSlot();
@@ -85,6 +90,7 @@ public slots:
     void binaryPasteIgnoreSizeSlot();
     void binarySaveToFileSlot();
     void findPattern();
+    void copyFileOffsetSlot();
     void undoSelectionSlot();
     void followStackSlot();
     void findReferencesSlot();
@@ -92,115 +98,30 @@ public slots:
     void followDataSlot();
     void followDataDumpSlot();
 
+    void watchSlot();
+
     void selectionUpdatedSlot();
     void yaraSlot();
     void dataCopySlot();
     void entropySlot();
     void syncWithExpressionSlot();
     void followInDumpNSlot();
+    void allocMemorySlot();
 
-    void gotoNextSlot();
-    void gotoPrevSlot();
+    void followInMemoryMapSlot();
 
 private:
-    QMenu* mBreakpointMenu;
+    MenuBuilder* mMenuBuilder;
 
-    QMenu* mMemoryAccessMenu;
-    QAction* mMemoryAccessSingleshoot;
-    QAction* mMemoryAccessRestore;
-    QMenu* mMemoryWriteMenu;
-    QAction* mMemoryWriteSingleshoot;
-    QAction* mMemoryWriteRestore;
-    QMenu* mMemoryExecuteMenu;
-    QAction* mMemoryExecuteSingleshoot;
-    QAction* mMemoryExecuteRestore;
-    QAction* mMemoryRemove;
-    QMenu* mHardwareAccessMenu;
-    QAction* mHardwareAccess1;
-    QAction* mHardwareAccess2;
-    QAction* mHardwareAccess4;
-#ifdef _WIN64
-    QAction* mHardwareAccess8;
-#endif //_WIN64
-    QMenu* mHardwareWriteMenu;
-    QAction* mHardwareWrite1;
-    QAction* mHardwareWrite2;
-    QAction* mHardwareWrite4;
-#ifdef _WIN64
-    QAction* mHardwareWrite8;
-#endif //_WIN64
-    QAction* mHardwareExecute;
-    QAction* mHardwareRemove;
-
-    QAction* mFollowStack;
-
-    QMenu* mGotoMenu;
-    QAction* mGotoExpression;
-    QAction* mGotoFileOffset;
-    QAction* mGotoPrevious;
-    QAction* mGotoNext;
-    QAction* mGotoStart;
-    QAction* mGotoEnd;
-
-    QAction* mFollowInDisasm;
-
-    QMenu* mHexMenu;
-    QAction* mHexAsciiAction;
-    QAction* mHexUnicodeAction;
-    QAction* mHexCodepageAction;
-
-    QMenu* mTextMenu;
-    QAction* mTextAsciiAction;
-    QAction* mTextUnicodeAction;
-    QAction* mTextCodepageAction;
-
-    QMenu* mIntegerMenu;
-    QAction* mIntegerSignedShortAction;
-    QAction* mIntegerSignedLongAction;
-    QAction* mIntegerSignedLongLongAction;
-    QAction* mIntegerUnsignedShortAction;
-    QAction* mIntegerUnsignedLongAction;
-    QAction* mIntegerUnsignedLongLongAction;
-    QAction* mIntegerHexShortAction;
-    QAction* mIntegerHexLongAction;
-    QAction* mIntegerHexLongLongAction;
-
-    QMenu* mFloatMenu;
-    QAction* mFloatFloatAction;
-    QAction* mFloatDoubleAction;
-    QAction* mFloatLongDoubleAction;
-
-    QAction* mAddressAction;
-    QAction* mDisassemblyAction;
-
-    QAction* mSetLabelAction;
-    QAction* mModifyValueAction;
-
-    QMenu* mBinaryMenu;
-    QAction* mBinaryEditAction;
-    QAction* mBinaryFillAction;
-    QAction* mBinaryCopyAction;
-    QAction* mBinaryPasteAction;
-    QAction* mBinaryPasteIgnoreSizeAction;
-    QAction* mBinarySaveToFile;
-    QAction* mFindPatternAction;
-    QAction* mFindReferencesAction;
-    QAction* mYaraAction;
-    QAction* mDataCopyAction;
-    QAction* mUndoSelection;
-    QAction* mFollowData;
-    QAction* mFollowDataDump;
-    QAction* mSyncWithExpression;
-    QAction* mEntropy;
-    QMenu* mSpecialMenu;
-    QMenu* mCustomMenu;
     QMenu* mPluginMenu;
     QMenu* mFollowInDumpMenu;
     QList<QAction*> mFollowInDumpActions;
 
-    GotoDialog* mGoto;
+    GotoDialog* mGoto = nullptr;
+    GotoDialog* mGotoOffset = nullptr;
     CPUDisassembly* mDisas;
     CPUMultiDump* mMultiDump;
+    int mAsciiSeparator = 0;
 
     enum ViewEnum_t
     {
@@ -220,7 +141,9 @@ private:
         ViewFloatFloat,
         ViewFloatDouble,
         ViewFloatLongDouble,
-        ViewAddress
+        ViewAddress,
+        ViewIntegerSignedByte,
+        ViewIntegerUnsignedByte
     };
 
     void setView(ViewEnum_t view);

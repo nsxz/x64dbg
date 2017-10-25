@@ -208,7 +208,7 @@ void QHexEditPrivate::setHorizontalSpacing(int x)
     _horizonalSpacing = x;
     adjust();
     setCursorPos(cursorPos());
-    this->repaint();
+    this->update();
 }
 
 int QHexEditPrivate::horizontalSpacing()
@@ -449,7 +449,7 @@ void QHexEditPrivate::keyPressEvent(QKeyEvent* event)
                 return;
             }
             if((charX % 3) == 0)
-                insert(posBa, char(0), char(0));
+                insert(posBa, char(0), _wildcardEnabled);
         }
 
         // Change content

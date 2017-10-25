@@ -7,38 +7,38 @@ SCRIPT_EXPORT void Script::Debug::Wait()
 
 SCRIPT_EXPORT void Script::Debug::Run()
 {
-    DbgCmdExecDirect("run");
-    Wait();
+    if(DbgCmdExecDirect("run"))
+        Wait();
 }
 
 SCRIPT_EXPORT void Script::Debug::Pause()
 {
-    DbgCmdExecDirect("pause");
-    Wait();
+    if(DbgCmdExecDirect("pause"))
+        Wait();
 }
 
 SCRIPT_EXPORT void Script::Debug::Stop()
 {
-    DbgCmdExecDirect("StopDebug");
-    Wait();
+    if(DbgCmdExecDirect("StopDebug"))
+        Wait();
 }
 
 SCRIPT_EXPORT void Script::Debug::StepIn()
 {
-    DbgCmdExecDirect("StepInto");
-    Wait();
+    if(DbgCmdExecDirect("StepInto"))
+        Wait();
 }
 
 SCRIPT_EXPORT void Script::Debug::StepOver()
 {
-    DbgCmdExecDirect("StepOver");
-    Wait();
+    if(DbgCmdExecDirect("StepOver"))
+        Wait();
 }
 
 SCRIPT_EXPORT void Script::Debug::StepOut()
 {
-    DbgCmdExecDirect("StepOut");
-    Wait();
+    if(DbgCmdExecDirect("StepOut"))
+        Wait();
 }
 
 SCRIPT_EXPORT bool Script::Debug::SetBreakpoint(duint address)
@@ -52,6 +52,13 @@ SCRIPT_EXPORT bool Script::Debug::DeleteBreakpoint(duint address)
 {
     char command[128] = "";
     sprintf_s(command, "bc %p", address);
+    return DbgCmdExecDirect(command);
+
+}
+SCRIPT_EXPORT bool Script::Debug::DisableBreakpoint(duint address)
+{
+    char command[128] = "";
+    sprintf_s(command, "bd %p", address);
     return DbgCmdExecDirect(command);
 }
 

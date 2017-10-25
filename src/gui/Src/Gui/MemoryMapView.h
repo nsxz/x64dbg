@@ -3,6 +3,8 @@
 
 #include "StdTable.h"
 
+class GotoDialog;
+
 class MemoryMapView : public StdTable
 {
     Q_OBJECT
@@ -12,7 +14,6 @@ public:
     void setupContextMenu();
 
 signals:
-    void showCpu();
     void showReferences();
 
 public slots:
@@ -20,15 +21,11 @@ public slots:
     void stateChangedSlot(DBGSTATE state);
     void followDumpSlot();
     void followDisassemblerSlot();
+    void doubleClickedSlot();
     void yaraSlot();
-    void memoryAccessSingleshootSlot();
-    void memoryAccessRestoreSlot();
-    void memoryWriteSingleshootSlot();
-    void memoryWriteRestoreSlot();
-    void memoryExecuteSingleshootSlot();
-    void memoryExecuteRestoreSlot();
-    void memoryRemoveSlot();
     void memoryExecuteSingleshootToggleSlot();
+    void memoryAllocateSlot();
+    void ExecCommand();
     void contextMenuSlot(const QPoint & pos);
     void switchView();
     void pageMemoryRights();
@@ -36,9 +33,19 @@ public slots:
     void entropy();
     void findPatternSlot();
     void dumpMemory();
+    void commentSlot();
+    void selectAddress(duint va);
+    void gotoOriginSlot();
+    void gotoExpressionSlot();
+    void addVirtualModSlot();
+    void selectionGetSlot(SELECTIONDATA* selection);
+    void disassembleAtSlot(dsint va, dsint cip);
 
 private:
     QString getProtectionString(DWORD Protect);
+    QAction* makeCommandAction(QAction* action, const QString & command);
+
+    GotoDialog* mGoto = nullptr;
 
     QAction* mFollowDump;
     QAction* mFollowDisassembly;
@@ -61,6 +68,15 @@ private:
     QAction* mMemoryExecuteSingleshootToggle;
     QAction* mEntropy;
     QAction* mFindPattern;
+    QMenu* mGotoMenu;
+    QAction* mGotoOrigin;
+    QAction* mGotoExpression;
+    QAction* mMemoryAllocate;
+    QAction* mMemoryFree;
+    QAction* mAddVirtualMod;
+    QAction* mComment;
+
+    duint mCipBase;
 };
 
 #endif // MEMORYMAPVIEW_H

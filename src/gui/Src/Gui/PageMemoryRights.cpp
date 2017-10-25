@@ -1,6 +1,7 @@
 #include "Imports.h"
 #include "PageMemoryRights.h"
 #include "ui_PageMemoryRights.h"
+#include "StringUtil.h"
 
 PageMemoryRights::PageMemoryRights(QWidget* parent) : QDialog(parent), ui(new Ui::PageMemoryRights)
 {
@@ -28,15 +29,15 @@ void PageMemoryRights::RunAddrSize(duint addrin, duint sizein, QString pagetypei
     duint nr_pages = size / PAGE_SIZE;
     tableWidget->setColumnCount(2);
     tableWidget->setRowCount(nr_pages);
-    tableWidget->setHorizontalHeaderItem(0, new QTableWidgetItem(QString("Address")));
-    tableWidget->setHorizontalHeaderItem(1, new QTableWidgetItem(QString("Rights")));
+    tableWidget->setHorizontalHeaderItem(0, new QTableWidgetItem(QString(tr("Address"))));
+    tableWidget->setHorizontalHeaderItem(1, new QTableWidgetItem(QString(tr("Rights"))));
 
     duint actual_addr;
     char rights[RIGHTS_STRING_SIZE];
     for(duint i = 0; i < nr_pages; i++)
     {
         actual_addr = addr + (i * PAGE_SIZE);
-        tableWidget->setItem(i, 0, new QTableWidgetItem(QString("%1").arg(actual_addr, sizeof(duint) * 2, 16, QChar('0')).toUpper()));
+        tableWidget->setItem(i, 0, new QTableWidgetItem(ToPtrString(actual_addr)));
         if(DbgFunctions()->GetPageRights(actual_addr, rights))
             tableWidget->setItem(i, 1, new QTableWidgetItem(QString(rights)));
     }

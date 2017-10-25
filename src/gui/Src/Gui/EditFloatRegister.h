@@ -3,7 +3,7 @@
 
 #include <QDialog>
 #include <QLineEdit>
-#include <HexValidator.h>
+#include "HexValidator.h"
 #include "LongLongValidator.h"
 #include <QDoubleValidator>
 
@@ -81,6 +81,7 @@ private:
     QDoubleValidator doubleValidator;
 
     void hideUpperPart();
+    void hideNonMMXPart();
 
     void reloadDataLow();
     void reloadDataHigh();

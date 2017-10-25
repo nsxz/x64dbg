@@ -1,9 +1,19 @@
 #include "QBeaEngine.h"
+#include "StringUtil.h"
+#include "EncodeMap.h"
+#include "CodeFolding.h"
 
 QBeaEngine::QBeaEngine(int maxModuleSize)
-    : _tokenizer(maxModuleSize)
+    : _tokenizer(maxModuleSize), mCodeFoldingManager(nullptr), _bLongDataInst(false)
 {
     CapstoneTokenizer::UpdateColors();
+    UpdateDataInstructionMap();
+    this->mEncodeMap = new EncodeMap();
+}
+
+QBeaEngine::~QBeaEngine()
+{
+    delete this->mEncodeMap;
 }
 
 /**
@@ -20,13 +30,12 @@ QBeaEngine::QBeaEngine(int maxModuleSize)
  */
 ulong QBeaEngine::DisassembleBack(byte_t* data, duint base, duint size, duint ip, int n)
 {
-    Q_UNUSED(base)
     int i;
-    uint abuf[131], addr, back, cmdsize;
+    uint abuf[128], addr, back, cmdsize;
     unsigned char* pdata;
 
     // Reset Disasm Structure
-    Capstone cp;
+    Zydis cp;
 
     // Check if the pointer is not null
     if(data == NULL)
@@ -49,12 +58,19 @@ ulong QBeaEngine::DisassembleBack(byte_t* data, duint base, duint size, duint ip
     if(ip < (uint)n)
         return ip;
 
+    //TODO: buffer overflow due to unchecked "back" value
     back = MAX_DISASM_BUFFER * (n + 3); // Instruction length limited to 16
 
     if(ip < back)
         back = ip;
 
     addr = ip - back;
+    if(mCodeFoldingManager && mCodeFoldingManager->isFolded(addr + base))
+    {
+        duint newback = mCodeFoldingManager->getFoldBegin(addr + base);
+        if(newback >= base && newback < size + base)
+            addr = newback - base;
+    }
 
     pdata = data + addr;
 
@@ -62,10 +78,26 @@ ulong QBeaEngine::DisassembleBack(byte_t* data, duint base, duint size, duint ip
     {
         abuf[i % 128] = addr;
 
-        if(!cp.Disassemble(0, pdata, (int)size))
-            cmdsize = 2; //heuristic for better output (FF FE or FE FF are usually part of an instruction)
+        if(mCodeFoldingManager && mCodeFoldingManager->isFolded(addr + base))
+        {
+            duint newaddr = mCodeFoldingManager->getFoldBegin(addr + base);
+            if(newaddr >= base)
+            {
+                addr = newaddr - base;
+            }
+            cmdsize = mCodeFoldingManager->getFoldEnd(addr + base) - (addr + base) + 1;
+        }
         else
-            cmdsize = cp.Size();
+        {
+            if(!cp.DisassembleSafe(addr + base, pdata, (int)size))
+                cmdsize = 2; //heuristic for better output (FF FE or FE FF are usually part of an instruction)
+            else
+                cmdsize = cp.Size();
+
+            cmdsize = mEncodeMap->getDataSize(base + addr, cmdsize);
+
+        }
+
 
         pdata += cmdsize;
         addr += cmdsize;
@@ -94,13 +126,12 @@ ulong QBeaEngine::DisassembleBack(byte_t* data, duint base, duint size, duint ip
  */
 ulong QBeaEngine::DisassembleNext(byte_t* data, duint base, duint size, duint ip, int n)
 {
-    Q_UNUSED(base)
     int i;
     uint cmdsize;
     unsigned char* pdata;
 
     // Reset Disasm Structure
-    Capstone cp;
+    Zydis cp;
 
     if(data == NULL)
         return 0;
@@ -111,15 +142,26 @@ ulong QBeaEngine::DisassembleNext(byte_t* data, duint base, duint size, duint ip
     if(n <= 0)
         return ip;
 
+
     pdata = data + ip;
     size -= ip;
 
     for(i = 0; i < n && size > 0; i++)
     {
-        if(!cp.Disassemble(0, pdata, (int)size))
-            cmdsize = 1;
+        if(mCodeFoldingManager && mCodeFoldingManager->isFolded(ip + base))
+        {
+            cmdsize = mCodeFoldingManager->getFoldEnd(ip + base) - (ip + base) + 1;
+        }
         else
-            cmdsize = cp.Size();
+        {
+            if(!cp.DisassembleSafe(ip + base, pdata, (int)size))
+                cmdsize = 1;
+            else
+                cmdsize = cp.Size();
+
+            cmdsize = mEncodeMap->getDataSize(base + ip, cmdsize);
+
+        }
 
         pdata += cmdsize;
         ip += cmdsize;
@@ -134,15 +176,19 @@ ulong QBeaEngine::DisassembleNext(byte_t* data, duint base, duint size, duint ip
  *
  * @param[in]   data            Pointer to memory data (Can be either a buffer or the original data memory)
  * @param[in]   size            Size of the memory pointed by data (Can be the memory page size if data points to the original memory page base address)
- * @param[in]   instIndex       Offset to reach the instruction data from the data pointer
  * @param[in]   origBase        Original base address of the memory page (Required to disassemble destination addresses)
  * @param[in]   origInstRVA     Original Instruction RVA of the instruction to disassemble
  *
  * @return      Return the disassembled instruction
  */
-
-Instruction_t QBeaEngine::DisassembleAt(byte_t* data, duint size, duint instIndex, duint origBase, duint origInstRVA)
+Instruction_t QBeaEngine::DisassembleAt(byte_t* data, duint size, duint origBase, duint origInstRVA, bool datainstr)
 {
+    if(datainstr)
+    {
+        ENCODETYPE type = mEncodeMap->getDataType(origBase + origInstRVA);
+        if(!mEncodeMap->isCode(type))
+            return DecodeDataAt(data, size, origBase, origInstRVA, type);
+    }
     //tokenize
     CapstoneTokenizer::InstructionToken cap;
     _tokenizer.Tokenize(origBase + origInstRVA, data, size, cap);
@@ -151,33 +197,133 @@ Instruction_t QBeaEngine::DisassembleAt(byte_t* data, duint size, duint instInde
     const auto & cp = _tokenizer.GetCapstone();
     bool success = cp.Success();
 
-    auto branchType = Instruction_t::None;
-    if(success && (cp.InGroup(CS_GRP_JUMP) || cp.IsLoop()))
-    {
-        switch(cp.GetId())
-        {
-        case X86_INS_JMP:
-            branchType = Instruction_t::Unconditional;
-            break;
-        default:
-            branchType = Instruction_t::Conditional;
-            break;
-        }
-    }
 
+    auto branchType = Instruction_t::None;
     Instruction_t wInst;
+    if(success && (cp.IsBranchType(Zydis::BTJmp | Zydis::BTCall | Zydis::BTRet | Zydis::BTLoop)))
+    {
+        wInst.branchDestination = DbgGetBranchDestination(origBase + origInstRVA);
+        if(cp.IsBranchType(Zydis::BTUncondJmp))
+            branchType = Instruction_t::Unconditional;
+        else if(cp.IsBranchType(Zydis::BTCall))
+            branchType = Instruction_t::Call;
+        else if(cp.IsBranchType(Zydis::BTCondJmp))
+            branchType = Instruction_t::Conditional;
+    }
+    else
+        wInst.branchDestination = 0;
+
     wInst.instStr = QString(cp.InstructionText().c_str());
     wInst.dump = QByteArray((const char*)data, len);
     wInst.rva = origInstRVA;
-    wInst.length = len;
+    if(mCodeFoldingManager && mCodeFoldingManager->isFolded(origInstRVA))
+        wInst.length = mCodeFoldingManager->getFoldEnd(origInstRVA + origBase) - (origInstRVA + origBase) + 1;
+    else
+        wInst.length = len;
     wInst.branchType = branchType;
-    wInst.branchDestination = cp.BranchDestination();
+    wInst.tokens = cap;
+
+    if(!success)
+        return wInst;
+
+    auto instr = cp.GetInstr();
+    cp.RegInfo(reginfo);
+
+    for(ZydisCPUFlag i = 0; i <= ZYDIS_CPUFLAG_MAX_VALUE; ++i)
+    {
+        auto flagAction = instr->accessedFlags[i].action;
+        if(flagAction == ZYDIS_CPUFLAG_ACTION_NONE)
+            continue;
+
+        Zydis::RegAccessInfo rai;
+        switch(flagAction)
+        {
+        case ZYDIS_CPUFLAG_ACTION_MODIFIED:
+        case ZYDIS_CPUFLAG_ACTION_SET_0:
+        case ZYDIS_CPUFLAG_ACTION_SET_1:
+            rai = Zydis::RAIWrite;
+            break;
+        case ZYDIS_CPUFLAG_ACTION_TESTED:
+            rai = Zydis::RAIRead;
+            break;
+        default:
+            rai = Zydis::RAINone;
+            break;
+        }
+
+        reginfo[ZYDIS_REGISTER_RFLAGS] = Zydis::RAINone;
+        reginfo[ZYDIS_REGISTER_EFLAGS] = Zydis::RAINone;
+        reginfo[ZYDIS_REGISTER_FLAGS]  = Zydis::RAINone;
+
+        wInst.regsReferenced.emplace_back(cp.FlagName(i), rai);
+    }
+
+    reginfo[ArchValue(ZYDIS_REGISTER_EIP, ZYDIS_REGISTER_RIP)] = Zydis::RAINone;
+    for(ZydisRegister i = ZYDIS_REGISTER_NONE; i <= ZYDIS_REGISTER_MAX_VALUE; ++i)
+        if(reginfo[i])
+            wInst.regsReferenced.emplace_back(cp.RegName(ZydisRegister(i)), reginfo[i]);
+
+    return wInst;
+}
+
+Instruction_t QBeaEngine::DecodeDataAt(byte_t* data, duint size, duint origBase, duint origInstRVA, ENCODETYPE type)
+{
+    //tokenize
+    CapstoneTokenizer::InstructionToken cap;
+
+    auto infoIter = dataInstMap.find(type);
+    if(infoIter == dataInstMap.end())
+        infoIter = dataInstMap.find(enc_byte);
+
+    int len = mEncodeMap->getDataSize(origBase + origInstRVA, 1);
+
+    QString mnemonic = _bLongDataInst ? infoIter.value().longName : infoIter.value().shortName;
+
+    len = std::min(len, (int)size);
+
+    QString datastr = GetDataTypeString(data, len, type);
+
+    _tokenizer.TokenizeData(mnemonic, datastr, cap);
+
+    Instruction_t wInst;
+    wInst.instStr = mnemonic + " " + datastr;
+    wInst.dump = QByteArray((const char*)data, len);
+    wInst.rva = origInstRVA;
+    wInst.length = len;
+    wInst.branchType = Instruction_t::None;
+    wInst.branchDestination = 0;
     wInst.tokens = cap;
 
     return wInst;
 }
 
+void QBeaEngine::UpdateDataInstructionMap()
+{
+    dataInstMap.clear();
+    dataInstMap.insert(enc_byte, {"db", "byte", "int8"});
+    dataInstMap.insert(enc_word, {"dw", "word", "short"});
+    dataInstMap.insert(enc_dword, {"dd", "dword", "int"});
+    dataInstMap.insert(enc_fword, {"df", "fword", "fword"});
+    dataInstMap.insert(enc_qword, {"dq", "qword", "long"});
+    dataInstMap.insert(enc_tbyte, {"tbyte", "tbyte", "tbyte"});
+    dataInstMap.insert(enc_oword, {"oword", "oword", "oword"});
+    dataInstMap.insert(enc_mmword, {"mmword", "mmword", "long long"});
+    dataInstMap.insert(enc_xmmword, {"xmmword", "xmmword", "_m128"});
+    dataInstMap.insert(enc_ymmword, {"ymmword", "ymmword", "_m256"});
+    dataInstMap.insert(enc_real4, {"real4", "real4", "float"});
+    dataInstMap.insert(enc_real8, {"real8", "real8", "double"});
+    dataInstMap.insert(enc_real10, {"real10", "real10", "long double"});
+    dataInstMap.insert(enc_ascii, {"ascii", "ascii", "string"});
+    dataInstMap.insert(enc_unicode, {"unicode", "unicode", "wstring"});
+}
+
+void QBeaEngine::setCodeFoldingManager(CodeFoldingHelper* CodeFoldingManager)
+{
+    mCodeFoldingManager = CodeFoldingManager;
+}
+
 void QBeaEngine::UpdateConfig()
 {
+    _bLongDataInst = ConfigBool("Disassembler", "LongDataInstruction");
     _tokenizer.UpdateConfig();
 }

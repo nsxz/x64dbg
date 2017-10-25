@@ -17,48 +17,37 @@ UpdateChecker::UpdateChecker(QWidget* parent)
 
 void UpdateChecker::checkForUpdates()
 {
-    get(QNetworkRequest(QUrl("http://jenkins.x64dbg.com/job/vs13/lastSuccessfulBuild/api/json")));
+    get(QNetworkRequest(QUrl("https://api.github.com/repos/x64dbg/x64dbg/releases/latest")));
 }
 
 void UpdateChecker::finishedSlot(QNetworkReply* reply)
 {
     if(reply->error() != QNetworkReply::NoError) //error
     {
-        QMessageBox msg(QMessageBox::Critical, "Network Error!", reply->errorString());
-        msg.setParent(mParent, Qt::Dialog);
-        msg.setWindowIcon(QIcon(":/icons/images/compile-error.png"));
-        msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-        msg.exec();
+        SimpleErrorBox(mParent, tr("Network Error!"), reply->errorString());
         return;
     }
-    bool ok = false;
     QString json = QString(reply->readAll());
-    QRegExp regExp("\"timestamp\":([0-9]+)");
-    qulonglong timestamp;
-    if(regExp.indexIn(json) >= 0)
-        timestamp = regExp.cap(1).toULongLong(&ok) / 1000;
     reply->close();
-    if(!ok)
+    QRegExp regExp("\"published_at\": ?\"([^\"]+)\"");
+    QDateTime serverTime;
+    if(regExp.indexIn(json) >= 0)
+        serverTime = QDateTime::fromString(regExp.cap(1), Qt::ISODate);
+    if(!serverTime.isValid())
     {
-        QMessageBox msg(QMessageBox::Critical, "Error!", "File on server could not be parsed...");
-        msg.setParent(mParent, Qt::Dialog);
-        msg.setWindowIcon(QIcon(":/icons/images/compile-error.png"));
-        msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-        msg.exec();
+        SimpleErrorBox(mParent, tr("Error!"), tr("File on server could not be parsed..."));
         return;
     }
-    auto server = QDateTime::fromTime_t(timestamp).date();
+    QRegExp regUrl("\"browser_download_url\": ?\"([^\"]+)\"");
+    auto url = regUrl.indexIn(json) >= 0 ? regUrl.cap(1) : "http://releases.x64dbg.com";
+    auto server = serverTime.date();
     auto build = GetCompileDate();
     QString info;
     if(server > build)
-        info = QString("New build %1 available!<br>Download <a href=\"http://releases.x64dbg.com\">here</a><br><br>You are now on build %2").arg(ToDateString(server), ToDateString(build));
+        info = QString(tr("New build %1 available!<br>Download <a href=\"%2\">here</a><br><br>You are now on build %3")).arg(ToDateString(server)).arg(url).arg(ToDateString(build));
     else if(server < build)
-        info = QString("You have a development build (%1) of x64dbg!").arg(ToDateString(build));
+        info = QString(tr("You have a development build (%1) of x64dbg!")).arg(ToDateString(build));
     else
-        info = QString("You have the latest build (%1) of x64dbg!").arg(ToDateString(build));
-    QMessageBox msg(QMessageBox::Information, "Information", info);
-    msg.setWindowIcon(QIcon(":/icons/images/information.png"));
-    msg.setParent(mParent, Qt::Dialog);
-    msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-    msg.exec();
+        info = QString(tr("You have the latest build (%1) of x64dbg!")).arg(ToDateString(build));
+    SimpleInfoBox(mParent, tr("Information"), info);
 }

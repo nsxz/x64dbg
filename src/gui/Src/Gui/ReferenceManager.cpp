@@ -9,8 +9,8 @@ ReferenceManager::ReferenceManager(QWidget* parent) : QTabWidget(parent)
 
     //Close All Tabs
     mCloseAllTabs = new QPushButton(this);
-    mCloseAllTabs->setIcon(QIcon(":/icons/images/close-all-tabs.png"));
-    mCloseAllTabs->setToolTip("Close All Tabs");
+    mCloseAllTabs->setIcon(DIcon("close-all-tabs.png"));
+    mCloseAllTabs->setToolTip(tr("Close All Tabs"));
     connect(mCloseAllTabs, SIGNAL(clicked()), this, SLOT(closeAllTabs()));
     setCornerWidget(mCloseAllTabs, Qt::TopLeftCorner);
     setContextMenuPolicy(Qt::CustomContextMenu);
@@ -28,7 +28,8 @@ void ReferenceManager::newReferenceView(QString name)
 {
     if(mCurrentReferenceView) //disconnect previous reference view
         mCurrentReferenceView->disconnectBridge();
-    mCurrentReferenceView = new ReferenceView();
+    mCurrentReferenceView = new ReferenceView(false, this);
+    mCurrentReferenceView->connectBridge();
     connect(mCurrentReferenceView, SIGNAL(showCpu()), this, SIGNAL(showCpu()));
     insertTab(0, mCurrentReferenceView, name);
     setCurrentIndex(0);
@@ -38,9 +39,12 @@ void ReferenceManager::newReferenceView(QString name)
 void ReferenceManager::closeTab(int index)
 {
     removeTab(index);
+    if(count() <= 0)
+        emit showCpu();
 }
 
 void ReferenceManager::closeAllTabs()
 {
     clear();
+    emit showCpu();
 }

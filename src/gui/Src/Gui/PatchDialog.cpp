@@ -4,6 +4,7 @@
 #include <QIcon>
 #include <QFileDialog>
 #include <QTextStream>
+#include "MiscUtil.h"
 
 PatchDialog::PatchDialog(QWidget* parent) :
     QDialog(parent),
@@ -11,7 +12,6 @@ PatchDialog::PatchDialog(QWidget* parent) :
 {
     ui->setupUi(this);
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
-    setFixedSize(this->size()); //fixed size
     setModal(false); //non-modal window
 
     connect(Bridge::getBridge(), SIGNAL(updatePatches()), this, SLOT(updatePatches()));
@@ -182,13 +182,13 @@ void PatchDialog::groupToggle()
         unsigned char writebyte = curPatchList[i].status.checked ? curPatchList[i].patch.newbyte : curPatchList[i].patch.oldbyte;
         DbgMemWrite(curPatchList[i].patch.addr, &writebyte, sizeof(writebyte));
     }
-    GuiUpdateAllViews();
     mIsWorking = false;
     dsint groupStart = getGroupAddress(curPatchList, group);
+    GuiUpdateAllViews();
     if(!groupStart)
         return;
     QString color = enabled ? "#00DD00" : "red";
-    QString addrText = QString("%1").arg(groupStart, sizeof(dsint) * 2, 16, QChar('0')).toUpper();
+    QString addrText = ToPtrString(groupStart);
     QString title = "<font color='" + color + "'><b>" + QString().sprintf("%d:", group) + addrText + "</b></font>";
     mGroupSelector->setGroupTitle(title);
     DbgCmdExecDirect(QString("disasm " + addrText).toUtf8().constData());
@@ -209,7 +209,7 @@ void PatchDialog::groupPrevious()
         return;
     group--;
     QString color = isGroupEnabled(curPatchList, group) ? "#00DD00" : "red";
-    QString addrText = QString("%1").arg(getGroupAddress(curPatchList, group), sizeof(dsint) * 2, 16, QChar('0')).toUpper();
+    QString addrText = ToPtrString(getGroupAddress(curPatchList, group));
     QString title = "<font color='" + color + "'><b>" + QString().sprintf("%d:", group) + addrText + "</b></font>";
     mGroupSelector->setGroupTitle(title);
     mGroupSelector->setGroup(group);
@@ -234,7 +234,7 @@ void PatchDialog::groupNext()
         return;
     group++;
     QString color = isGroupEnabled(curPatchList, group) ? "#00DD00" : "red";
-    QString addrText = QString("%1").arg(getGroupAddress(curPatchList, group), sizeof(dsint) * 2, 16, QChar('0')).toUpper();
+    QString addrText = ToPtrString(getGroupAddress(curPatchList, group));
     QString title = "<font color='" + color + "'><b>" + QString().sprintf("%d:", group) + addrText + "</b></font>";
     mGroupSelector->setGroupTitle(title);
     mGroupSelector->setGroup(group);
@@ -259,11 +259,16 @@ void PatchDialog::on_listModules_itemSelectionChanged()
     for(int i = 0; i < patchList.size(); i++)
     {
         const DBGPATCHINFO curPatch = patchList.at(i).patch;
-        QString addrText = QString("%1").arg(curPatch.addr, sizeof(dsint) * 2, 16, QChar('0')).toUpper();
+        QString addrText = ToPtrString(curPatch.addr);
         QListWidgetItem* item = new QListWidgetItem(QString().sprintf("%d", patchList.at(i).status.group).rightJustified(4, ' ', true) + "|" + addrText + QString().sprintf(":%.2X->%.2X", curPatch.oldbyte, curPatch.newbyte), ui->listPatches);
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
         Qt::CheckState state = patchList.at(i).status.checked ? Qt::Checked : Qt::Unchecked;
         item->setCheckState(state);
+        if(DbgFunctions()->ModRelocationAtAddr(patchList.at(i).patch.addr, nullptr))
+        {
+            item->setTextColor(ConfigColor("PatchRelocatedByteHighlightColor"));
+            item->setToolTip(tr("Byte is located in relocation region"));
+        }
     }
     mIsWorking = false;
 }
@@ -302,14 +307,14 @@ void PatchDialog::on_listPatches_itemChanged(QListWidgetItem* item) //checkbox c
             }
         mIsWorking = false;
     }
-    GuiUpdateAllViews();
     int group = mGroupSelector->group();
     QString color = isGroupEnabled(curPatchList, group) ? "#00DD00" : "red";
-    QString addrText = QString("%1").arg(getGroupAddress(curPatchList, group), sizeof(dsint) * 2, 16, QChar('0')).toUpper();
+    QString addrText = ToPtrString(getGroupAddress(curPatchList, group));
     QString title = "<font color='" + color + "'><b>" + QString().sprintf("%d:", group) + addrText + "</b></font>";
     mGroupSelector->setGroupTitle(title);
     mGroupSelector->setPreviousEnabled(hasPreviousGroup(curPatchList, group));
     mGroupSelector->setNextEnabled(hasNextGroup(curPatchList, group));
+    GuiUpdateAllViews();
 }
 
 void PatchDialog::on_btnSelectAll_clicked()
@@ -395,7 +400,7 @@ void PatchDialog::on_listPatches_itemSelectionChanged()
     dsint groupStart = getGroupAddress(curPatchList, patch.status.group);
     if(!groupStart)
         return;
-    QString addrText = QString("%1").arg(groupStart, sizeof(dsint) * 2, 16, QChar('0')).toUpper();
+    QString addrText = ToPtrString(groupStart);
     DbgCmdExecDirect(QString("disasm " + addrText).toUtf8().constData());
     DbgCmdExecDirect(QString("dump " + addrText).toUtf8().constData());
 }
@@ -415,7 +420,7 @@ void PatchDialog::on_btnPickGroups_clicked()
 
     int group = mGroupSelector->group();
     QString color = isGroupEnabled(curPatchList, group) ? "#00DD00" : "red";
-    QString addrText = QString("%1").arg(getGroupAddress(curPatchList, group), sizeof(dsint) * 2, 16, QChar('0')).toUpper();
+    QString addrText = ToPtrString(getGroupAddress(curPatchList, group));
     QString title = "<font color='" + color + "'><b>" + QString().sprintf("%d:", group) + addrText + "</b></font>";
     mGroupSelector->setGroupTitle(title);
     mGroupSelector->setPreviousEnabled(hasPreviousGroup(curPatchList, group));
@@ -443,20 +448,17 @@ void PatchDialog::on_btnPatchFile_clicked()
             patchList.push_back(curPatchList.at(i).patch);
     if(!curPatchList.size() || !patchList.size())
     {
-        QMessageBox msg(QMessageBox::Information, tr("Information"), tr("Nothing to patch!"));
-        msg.setWindowIcon(QIcon(":/icons/images/information.png"));
-        msg.setParent(this, Qt::Dialog);
-        msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-        msg.exec();
+        SimpleInfoBox(this, tr("Information"), tr("Nothing to patch!"));
         return;
     }
+
+    if(containsRelocatedBytes(curPatchList) && !showRelocatedBytesWarning())
+        return;
+
     char szModName[MAX_PATH] = "";
     if(!DbgFunctions()->ModPathFromAddr(DbgFunctions()->ModBaseFromName(mod.toUtf8().constData()), szModName, MAX_PATH))
     {
-        QMessageBox msg(QMessageBox::Critical, tr("Error!"), tr("Failed to get module filename..."));
-        msg.setWindowIcon(QIcon(":/icons/images/compile-error.png"));
-        msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-        msg.exec();
+        SimpleErrorBox(this, tr("Error!"), tr("Failed to get module filename..."));
         return;
     }
 
@@ -482,40 +484,18 @@ void PatchDialog::on_btnPatchFile_clicked()
     delete [] dbgPatchList;
     if(patched == -1)
     {
-        QMessageBox msg(QMessageBox::Critical, tr("Error!"), tr("Failed to save patched file (%1)").arg(error));
-        msg.setWindowIcon(QIcon(":/icons/images/compile-error.png"));
-        msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-        msg.exec();
+        SimpleErrorBox(this, tr("Error!"), tr("Failed to save patched file (%1)").arg(error));
         return;
     }
-    QMessageBox msg(QMessageBox::Information, tr("Information"), tr("%1/%2 patch(es) applied!").arg(patched).arg(patchList.size()));
-    msg.setWindowIcon(QIcon(":/icons/images/information.png"));
-    msg.setParent(this, Qt::Dialog);
-    msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-    msg.exec();
+    SimpleInfoBox(this, tr("Information"), tr("%1/%2 patch(es) applied!").arg(patched).arg(patchList.size()));
 }
 
 void PatchDialog::on_btnImport_clicked()
 {
-    QString filename = QFileDialog::getOpenFileName(this, tr("Open patch"), "", tr("Patch files (*.1337)"));
-    if(!filename.length())
-        return;
-    filename = QDir::toNativeSeparators(filename); //convert to native path format (with backlashes)
-    QFile file(filename);
-    file.open(QFile::ReadOnly | QFile::Text);
-    QTextStream in(&file);
-    QString patch = in.readAll();
-    file.close();
-    patch = patch.replace("\r\n", "\n");
-    QStringList lines = patch.split("\n", QString::SkipEmptyParts);
-    if(!lines.size())
-    {
-        QMessageBox msg(QMessageBox::Critical, tr("Error!"), tr("The patch file is empty..."));
-        msg.setWindowIcon(QIcon(":/icons/images/compile-error.png"));
-        msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-        msg.exec();
-        return;
-    }
+    QStringList filenamelist = QFileDialog::getOpenFileNames(this, tr("Open patch"), "", tr("Patch files (*.1337)"));
+    int patched = 0;
+    bool bBadOriginal = false;
+    bool bAlreadyDone = false;
 
     typedef struct _IMPORTSTATUS
     {
@@ -524,66 +504,80 @@ void PatchDialog::on_btnImport_clicked()
     } IMPORTSTATUS;
     QList<QPair<DBGPATCHINFO, IMPORTSTATUS>> patchList;
     DBGPATCHINFO curPatch;
-    dsint modbase = 0;
-    bool bBadOriginal = false;
-    bool bAlreadyDone = false;
-    for(int i = 0; i < lines.size(); i++)
+
+    for(const auto & filename1 : filenamelist)
     {
-        ULONGLONG rva;
-        unsigned int oldbyte;
-        unsigned int newbyte;
-        QString curLine = lines.at(i);
-        if(curLine.startsWith(">")) //module
+        if(!filename1.length())
+            continue;
+        QString filename = QDir::toNativeSeparators(filename1); //convert to native path format (with backlashes)
+        QFile file(filename);
+        file.open(QFile::ReadOnly | QFile::Text);
+        QTextStream in(&file);
+        QString patch = in.readAll();
+        file.close();
+        patch = patch.replace("\r\n", "\n");
+        QStringList lines = patch.split("\n", QString::SkipEmptyParts);
+        if(!lines.size())
         {
-            strcpy_s(curPatch.mod, curLine.toUtf8().constData() + 1);
-            modbase = DbgFunctions()->ModBaseFromName(curPatch.mod);
+            SimpleErrorBox(this, tr("Error!"), tr("The patch file is empty..."));
             continue;
         }
-        if(!modbase)
-            continue;
-        curLine = curLine.replace(" ", "");
-        if(sscanf_s(curLine.toUtf8().constData(), "%llX:%X->%X", &rva, &oldbyte, &newbyte) != 3)
+
+        dsint modbase = 0;
+        for(int i = 0; i < lines.size(); i++)
         {
-            QMessageBox msg(QMessageBox::Critical, tr("Error!"), tr("Patch file format is incorrect..."));
-            msg.setWindowIcon(QIcon(":/icons/images/compile-error.png"));
-            msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-            msg.exec();
-            return;
+            ULONGLONG rva;
+            unsigned int oldbyte;
+            unsigned int newbyte;
+            QString curLine = lines.at(i);
+            if(curLine.startsWith(">")) //module
+            {
+                strcpy_s(curPatch.mod, curLine.toUtf8().constData() + 1);
+                modbase = DbgFunctions()->ModBaseFromName(curPatch.mod);
+                continue;
+            }
+            if(!modbase)
+                continue;
+            curLine = curLine.replace(" ", "");
+            if(sscanf_s(curLine.toUtf8().constData(), "%llX:%X->%X", &rva, &oldbyte, &newbyte) != 3)
+            {
+                //File format is error. Don't continue processing this file
+                SimpleErrorBox(this, tr("Error!"), tr("Patch file format is incorrect..."));
+                break;
+            }
+            oldbyte &= 0xFF;
+            newbyte &= 0xFF;
+            curPatch.addr = rva + modbase;
+            if(!DbgMemIsValidReadPtr(curPatch.addr))
+                continue;
+            unsigned char checkbyte = 0;
+            DbgMemRead(curPatch.addr, &checkbyte, sizeof(checkbyte));
+            IMPORTSTATUS status;
+            status.alreadypatched = (checkbyte == newbyte);
+            status.badoriginal = (checkbyte != oldbyte);
+            if(status.alreadypatched)
+                bAlreadyDone = true;
+            else if(status.badoriginal)
+                bBadOriginal = true;
+            curPatch.oldbyte = oldbyte;
+            curPatch.newbyte = newbyte;
+            patchList.push_back(QPair<DBGPATCHINFO, IMPORTSTATUS>(curPatch, status));
         }
-        oldbyte &= 0xFF;
-        newbyte &= 0xFF;
-        curPatch.addr = rva + modbase;
-        if(!DbgMemIsValidReadPtr(curPatch.addr))
-            continue;
-        unsigned char checkbyte = 0;
-        DbgMemRead(curPatch.addr, &checkbyte, sizeof(checkbyte));
-        IMPORTSTATUS status;
-        status.alreadypatched = (checkbyte == newbyte);
-        status.badoriginal = (checkbyte != oldbyte);
-        if(status.alreadypatched)
-            bAlreadyDone = true;
-        else if(status.badoriginal)
-            bBadOriginal = true;
-        curPatch.oldbyte = oldbyte;
-        curPatch.newbyte = newbyte;
-        patchList.push_back(QPair<DBGPATCHINFO, IMPORTSTATUS>(curPatch, status));
     }
 
+    //Check if any patch exists
     if(!patchList.size())
     {
-        QMessageBox msg(QMessageBox::Information, tr("Information"), tr("No patches to apply in the current process."));
-        msg.setWindowIcon(QIcon(":/icons/images/information.png"));
-        msg.setParent(this, Qt::Dialog);
-        msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-        msg.exec();
+        SimpleInfoBox(this, tr("Information"), tr("No patches to apply in the current process."));
         return;
     }
 
+    //Warn if some are already patched
     bool bUndoPatched = false;
     if(bAlreadyDone)
     {
         QMessageBox msg(QMessageBox::Question, tr("Question"), tr("Some patches are already applied.\n\nDo you want to remove these patches?"), QMessageBox::Yes | QMessageBox::No);
-        msg.setWindowIcon(QIcon(":/icons/images/question.png"));
+        msg.setWindowIcon(DIcon("question.png"));
         msg.setParent(this, Qt::Dialog);
         msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
         if(msg.exec() == QMessageBox::Yes)
@@ -594,14 +588,14 @@ void PatchDialog::on_btnImport_clicked()
     if(bBadOriginal)
     {
         QMessageBox msg(QMessageBox::Question, tr("Question"), tr("Some bytes do not match the original in the patch file.\n\nDo you want to apply these patches anyway?"), QMessageBox::Yes | QMessageBox::No);
-        msg.setWindowIcon(QIcon(":/icons/images/question.png"));
+        msg.setWindowIcon(DIcon("question.png"));
         msg.setParent(this, Qt::Dialog);
         msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
         if(msg.exec() == QMessageBox::Yes)
             bPatchBadOriginals = true;
     }
 
-    int patched = 0;
+    //Apply all of the patches
     for(int i = 0; i < patchList.size(); i++)
     {
         if(!bPatchBadOriginals && patchList.at(i).second.badoriginal)
@@ -622,16 +616,15 @@ void PatchDialog::on_btnImport_clicked()
     updatePatches();
     GuiUpdateAllViews();
 
-    QMessageBox msg(QMessageBox::Information, tr("Information"), tr("%1/%2 patch(es) applied!").arg(patched).arg(patchList.size()));
-    msg.setWindowIcon(QIcon(":/icons/images/information.png"));
-    msg.setParent(this, Qt::Dialog);
-    msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-    msg.exec();
+    SimpleInfoBox(this, tr("Information"), tr("%1/%2 patch(es) applied!").arg(patched).arg(patchList.size()));
 }
 
 void PatchDialog::on_btnExport_clicked()
 {
     if(!mPatches.size())
+        return;
+
+    if(containsRelocatedBytes() && !showRelocatedBytesWarning())
         return;
 
     QString filename = QFileDialog::getSaveFileName(this, tr("Save patch"), "", tr("Patch files (*.1337)"));
@@ -664,7 +657,7 @@ void PatchDialog::saveAs1337(const QString & filename)
                 lines.push_back(">" + i.key());
                 bModPlaced = true;
             }
-            QString addrText = QString("%1").arg(curPatchList.at(j).patch.addr - modbase, sizeof(dsint) * 2, 16, QChar('0')).toUpper();
+            QString addrText = ToPtrString(curPatchList.at(j).patch.addr - modbase);
             lines.push_back(addrText + QString().sprintf(":%.2X->%.2X", curPatchList.at(j).patch.oldbyte, curPatchList.at(j).patch.newbyte));
             patches++;
         }
@@ -672,11 +665,7 @@ void PatchDialog::saveAs1337(const QString & filename)
 
     if(!lines.size())
     {
-        QMessageBox msg(QMessageBox::Information, tr("Information"), tr("No patches to export."));
-        msg.setWindowIcon(QIcon(":/icons/images/information.png"));
-        msg.setParent(this, Qt::Dialog);
-        msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-        msg.exec();
+        SimpleInfoBox(this, tr("Information"), tr("No patches to export."));
         return;
     }
 
@@ -686,9 +675,33 @@ void PatchDialog::saveAs1337(const QString & filename)
     file.write(text.toUtf8().constData(), text.length());
     file.close();
 
-    QMessageBox msg(QMessageBox::Information, tr("Information"), tr("%1 patch(es) exported!").arg(patches));
-    msg.setWindowIcon(QIcon(":/icons/images/information.png"));
-    msg.setParent(this, Qt::Dialog);
-    msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-    msg.exec();
+    SimpleInfoBox(this, tr("Information"), tr("%1 patch(es) exported!").arg(patches));
+}
+
+bool PatchDialog::containsRelocatedBytes()
+{
+    for(PatchMap::iterator i = mPatches.begin(); i != mPatches.end(); ++i)
+    {
+        const PatchInfoList & curPatchList = i.value();
+        if(containsRelocatedBytes(curPatchList))
+            return true;
+    }
+    return false;
+}
+
+bool PatchDialog::containsRelocatedBytes(const PatchInfoList & patchList)
+{
+    for(int i = 0; i < patchList.size(); i++)
+    {
+        if(patchList.at(i).status.checked && DbgFunctions()->ModRelocationAtAddr(patchList.at(i).patch.addr, nullptr))
+            return true;
+    }
+
+    return false;
+}
+
+bool PatchDialog::showRelocatedBytesWarning()
+{
+    auto result = QMessageBox::question(this, tr("Patches overlap with relocation regions"), tr("Your patches overlap with relocation regions. This can cause your code to become corrupted when you load the patched executable. Do you want to continue?"));
+    return result == QMessageBox::Yes;
 }

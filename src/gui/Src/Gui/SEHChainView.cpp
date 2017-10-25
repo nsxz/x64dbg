@@ -6,7 +6,7 @@ SEHChainView::SEHChainView(StdTable* parent) : StdTable(parent)
     int charWidth = getCharWidth();
 
     addColumnAt(8 + charWidth * sizeof(dsint) * 2, tr("Address"), true); //address in the stack
-    addColumnAt(8 + charWidth * sizeof(dsint) * 2, tr("Handler"), true); // Exception Handler
+    addColumnAt(8 + charWidth * sizeof(dsint) * 2, tr("Handler"), false); // Exception Handler
     addColumnAt(8 + charWidth * 50, tr("Module/Label"), false);
     addColumnAt(charWidth * 10, tr("Comment"), false);
     connect(Bridge::getBridge(), SIGNAL(updateSEHChain()), this, SLOT(updateSEHChain()));
@@ -18,9 +18,10 @@ SEHChainView::SEHChainView(StdTable* parent) : StdTable(parent)
 
 void SEHChainView::setupContextMenu()
 {
-    mFollowAddress = new QAction(tr("Follow &Address"), this);
+    QIcon icon = DIcon(ArchValue("processor32.png", "processor64.png"));
+    mFollowAddress = new QAction(icon, tr("Follow &Address"), this);
     connect(mFollowAddress, SIGNAL(triggered()), this, SLOT(followAddress()));
-    mFollowHandler = new QAction(tr("Follow Handler"), this);
+    mFollowHandler = new QAction(icon, tr("Follow Handler"), this);
     mFollowHandler->setShortcutContext(Qt::WidgetShortcut);
     mFollowHandler->setShortcut(QKeySequence("enter"));
     connect(mFollowHandler, SIGNAL(triggered()), this, SLOT(followHandler()));
@@ -37,9 +38,9 @@ void SEHChainView::updateSEHChain()
     setRowCount(sehchain.total);
     for(duint i = 0; i < sehchain.total; i++)
     {
-        QString cellText = QString("%1").arg(sehchain.records[i].addr, sizeof(duint) * 2, 16, QChar('0')).toUpper();
+        QString cellText = ToPtrString(sehchain.records[i].addr);
         setCellContent(i, 0, cellText);
-        cellText = QString("%1").arg(sehchain.records[i].handler, sizeof(duint) * 2, 16, QChar('0')).toUpper();
+        cellText = ToPtrString(sehchain.records[i].handler);
         setCellContent(i, 1, cellText);
 
         char label[MAX_LABEL_SIZE] = "";
@@ -62,12 +63,13 @@ void SEHChainView::updateSEHChain()
 
 void SEHChainView::contextMenuSlot(const QPoint pos)
 {
-    if(!DbgIsDebugging())
+    if(!DbgIsDebugging() || this->getRowCount() == 0)
         return;
     QMenu wMenu(this); //create context menu
     wMenu.addAction(mFollowAddress);
     wMenu.addAction(mFollowHandler);
     QMenu wCopyMenu(tr("&Copy"), this);
+    wCopyMenu.setIcon(DIcon("copy.png"));
     setupCopyMenu(&wCopyMenu);
     if(wCopyMenu.actions().length())
     {
@@ -86,12 +88,10 @@ void SEHChainView::followAddress()
 {
     QString addrText = getCellContent(getInitialSelection(), 0);
     DbgCmdExecDirect(QString("sdump " + addrText).toUtf8().constData());
-    emit showCpu();
 }
 
 void SEHChainView::followHandler()
 {
     QString addrText = getCellContent(getInitialSelection(), 1);
     DbgCmdExecDirect(QString("disasm " + addrText).toUtf8().constData());
-    emit showCpu();
 }

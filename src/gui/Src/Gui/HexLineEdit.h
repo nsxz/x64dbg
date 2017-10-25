@@ -2,7 +2,6 @@
 #define HEXLINEEDITT_H
 
 #include <QLineEdit>
-#include "Configuration.h"
 
 namespace Ui
 {
@@ -14,11 +13,6 @@ class HexLineEdit : public QLineEdit
     Q_OBJECT
 
 public:
-    enum class Encoding
-    {
-        Ascii,
-        Unicode
-    };
 
     explicit HexLineEdit(QWidget* parent = 0);
     ~HexLineEdit();
@@ -28,8 +22,8 @@ public:
     void setData(const QByteArray & data);
     QByteArray data();
 
-    void setEncoding(const Encoding encoding);
-    Encoding encoding();
+    void setEncoding(QTextCodec* encoding);
+    QTextCodec* encoding();
 
     void setKeepSize(const bool enabled);
     bool keepSize();
@@ -47,7 +41,7 @@ private:
     Ui::HexLineEdit* ui;
 
     QByteArray mData;
-    Encoding mEncoding;
+    QTextCodec* mEncoding;
     bool mKeepSize;
     bool mOverwriteMode;
 

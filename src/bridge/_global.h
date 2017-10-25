@@ -7,26 +7,27 @@
 //GUI typedefs
 typedef int (*GUIGUIINIT)(int, char**);
 typedef void* (*GUISENDMESSAGE)(GUIMSG type, void* param1, void* param2);
-typedef void (*GUISENDMESSAGEASYNC)(GUIMSG type, void* param1, void* param2);
+typedef const char* (*GUITRANSLATETEXT)(const char* source);
 
 //GUI functions
 extern GUIGUIINIT _gui_guiinit;
 extern GUISENDMESSAGE _gui_sendmessage;
-extern GUISENDMESSAGEASYNC _gui_sendmessageasync;
+extern GUITRANSLATETEXT _gui_translate_text;
 
 //DBG typedefs
 typedef const char* (*DBGDBGINIT)();
 typedef duint(*DBGMEMFINDBASEADDR)(duint addr, duint* size);
-typedef bool (*DBGMEMREAD)(duint addr, unsigned char* dest, duint size, duint* read);
-typedef bool (*DBGMEMWRITE)(duint addr, const unsigned char* src, duint size, duint* written);
+typedef bool (*DBGMEMREAD)(duint addr, void* dest, duint size, duint* read);
+typedef bool (*DBGMEMWRITE)(duint addr, const void* src, duint size, duint* written);
 typedef bool (*DBGDBGCMDEXEC)(const char* cmd);
 typedef bool (*DBGMEMMAP)(MEMMAP* memmap);
 typedef void (*DBGDBGEXITSIGNAL)();
 typedef bool (*DBGVALFROMSTRING)(const char* string, duint* value);
 typedef bool (*DBGISDEBUGGING)();
 typedef bool (*DBGISJUMPGOINGTOEXECUTE)(duint addr);
-typedef bool (*DBGADDRINFOGET)(duint addr, SEGMENTREG segment, ADDRINFO* addrinfo);
-typedef bool (*DBGADDRINFOSET)(duint addr, ADDRINFO* addrinfo);
+typedef bool (*DBGADDRINFOGET)(duint addr, SEGMENTREG segment, BRIDGE_ADDRINFO* addrinfo);
+typedef bool (*DBGADDRINFOSET)(duint addr, BRIDGE_ADDRINFO* addrinfo);
+typedef bool(*DBGENCODETYPESET)(duint addr, duint size, ENCODETYPE type);
 typedef BPXTYPE(*DBGBPGETTYPEAT)(duint addr);
 typedef bool (*DBGGETREGDUMP)(REGDUMP* regdump);
 typedef bool (*DBGVALTOSTRING)(const char* string, duint value);
@@ -49,6 +50,7 @@ extern DBGISDEBUGGING _dbg_isdebugging;
 extern DBGISJUMPGOINGTOEXECUTE _dbg_isjumpgoingtoexecute;
 extern DBGADDRINFOGET _dbg_addrinfoget;
 extern DBGADDRINFOSET _dbg_addrinfoset;
+extern DBGENCODETYPESET _dbg_encodetypeset;
 extern DBGBPGETTYPEAT _dbg_bpgettypeat;
 extern DBGGETREGDUMP _dbg_getregdump;
 extern DBGVALTOSTRING _dbg_valtostring;

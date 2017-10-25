@@ -43,9 +43,18 @@ typedef struct
 {
     DWORD dwProcessId;
     char szExeFile[MAX_PATH];
+    char szExeMainWindowTitle[MAX_PATH];
+    char szExeArgs[MAX_COMMAND_LINE_SIZE];
 } DBGPROCESSINFO;
 
-enum TRACERECORDBYTETYPE
+typedef struct
+{
+    DWORD rva;
+    BYTE type;
+    WORD size;
+} DBGRELOCATIONINFO;
+
+typedef enum
 {
     InstructionBody = 0,
     InstructionHeading = 1,
@@ -63,15 +72,15 @@ enum TRACERECORDBYTETYPE
     DataMMX,
     DataMixed, //the byte is accessed in multiple ways
     InstructionDataMixed //the byte is both executed and written
-};
+} TRACERECORDBYTETYPE;
 
-enum TRACERECORDTYPE
+typedef enum
 {
     TraceRecordNone,
     TraceRecordBitExec,
     TraceRecordByteWithExecTypeAndCounter,
     TraceRecordWordWithExecTypeAndCounter
-};
+} TRACERECORDTYPE;
 
 typedef struct
 {
@@ -92,6 +101,33 @@ typedef struct
     char StateText[TCP_ADDR_SIZE];
     unsigned int State;
 } TCPCONNECTIONINFO;
+
+typedef struct
+{
+    duint handle;
+    duint parent;
+    DWORD threadId;
+    DWORD style;
+    DWORD styleEx;
+    duint wndProc;
+    bool enabled;
+    RECT position;
+    char windowTitle[MAX_COMMENT_SIZE];
+    char windowClass[MAX_COMMENT_SIZE];
+} WINDOW_INFO;
+
+typedef struct
+{
+    duint addr;
+    duint size;
+    duint flags;
+} HEAPINFO;
+
+typedef struct
+{
+    const char* name;
+    duint value;
+} CONSTANTINFO;
 
 typedef bool (*ASSEMBLEATEX)(duint addr, const char* instruction, char* error, bool fillnop);
 typedef bool (*SECTIONFROMADDR)(duint addr, char* section);
@@ -126,21 +162,43 @@ typedef bool (*GETCMDLINE)(char* cmdline, size_t* cbsize);
 typedef bool (*SETCMDLINE)(const char* cmdline);
 typedef duint(*FILEOFFSETTOVA)(const char* modname, duint offset);
 typedef duint(*VATOFILEOFFSET)(duint va);
-typedef duint(*GETADDRFROMLINE)(const char* szSourceFile, int line);
+typedef duint(*GETADDRFROMLINE)(const char* szSourceFile, int line, duint* displacement);
 typedef bool (*GETSOURCEFROMADDR)(duint addr, char* szSourceFile, int* line);
 typedef bool (*VALFROMSTRING)(const char* string, duint* value);
 typedef bool (*PATCHGETEX)(duint addr, DBGPATCHINFO* info);
-typedef bool(*GETBRIDGEBP)(BPXTYPE type, duint addr, BRIDGEBP* bp);
-typedef bool(*STRINGFORMATINLINE)(const char* format, size_t resultSize, char* result);
-typedef void(*GETMNEMONICBRIEF)(const char* mnem, size_t resultSize, char* result);
+typedef bool (*GETBRIDGEBP)(BPXTYPE type, duint addr, BRIDGEBP* bp);
+typedef bool (*STRINGFORMATINLINE)(const char* format, size_t resultSize, char* result);
+typedef void (*GETMNEMONICBRIEF)(const char* mnem, size_t resultSize, char* result);
 typedef unsigned int (*GETTRACERECORDHITCOUNT)(duint address);
 typedef TRACERECORDBYTETYPE(*GETTRACERECORDBYTETYPE)(duint address);
 typedef bool (*SETTRACERECORDTYPE)(duint pageAddress, TRACERECORDTYPE type);
 typedef TRACERECORDTYPE(*GETTRACERECORDTYPE)(duint pageAddress);
-typedef bool(*ENUMHANDLES)(ListOf(HANDLEINFO) handles);
-typedef bool(*GETHANDLENAME)(duint handle, char* name, size_t nameSize, char* typeName, size_t typeNameSize);
-typedef bool(*ENUMTCPCONNECTIONS)(ListOf(TCPCONNECTIONINFO) connections);
+typedef bool (*ENUMHANDLES)(ListOf(HANDLEINFO) handles);
+typedef bool (*GETHANDLENAME)(duint handle, char* name, size_t nameSize, char* typeName, size_t typeNameSize);
+typedef bool (*ENUMTCPCONNECTIONS)(ListOf(TCPCONNECTIONINFO) connections);
+typedef duint(*GETDBGEVENTS)();
+typedef int (*MODGETPARTY)(duint base);
+typedef void (*MODSETPARTY)(duint base, int party);
+typedef bool(*WATCHISWATCHDOGTRIGGERED)(unsigned int id);
+typedef bool(*MEMISCODEPAGE)(duint addr, bool refresh);
+typedef bool(*ANIMATECOMMAND)(const char* command);
+typedef void(*DBGSETDEBUGGEEINITSCRIPT)(const char* fileName);
+typedef const char* (*DBGGETDEBUGGEEINITSCRIPT)();
+typedef bool(*HANDLESENUMWINDOWS)(ListOf(WINDOW_INFO) windows);
+typedef bool(*HANDLESENUMHEAPS)(ListOf(HEAPINFO) heaps);
+typedef bool(*THREADGETNAME)(DWORD tid, char* name);
+typedef bool(*ISDEPENABLED)();
+typedef void(*GETCALLSTACKEX)(DBGCALLSTACK* callstack, bool cache);
+typedef bool(*GETUSERCOMMENT)(duint addr, char* comment);
+typedef void(*ENUMCONSTANTS)(ListOf(CONSTANTINFO) constants);
+typedef duint(*MEMBPSIZE)(duint addr);
+typedef bool(*MODRELOCATIONSFROMADDR)(duint addr, ListOf(DBGRELOCATIONINFO) relocations);
+typedef bool(*MODRELOCATIONATADDR)(duint addr, DBGRELOCATIONINFO* relocation);
+typedef bool(*MODRELOCATIONSINRANGE)(duint addr, duint size, ListOf(DBGRELOCATIONINFO) relocations);
+typedef duint(*DBGETHASH)();
 
+//The list of all the DbgFunctions() return value.
+//WARNING: This list is append only. Do not insert things in the middle or plugins would break.
 typedef struct DBGFUNCTIONS_
 {
     ASSEMBLEATEX AssembleAtEx;
@@ -190,6 +248,28 @@ typedef struct DBGFUNCTIONS_
     ENUMHANDLES EnumHandles;
     GETHANDLENAME GetHandleName;
     ENUMTCPCONNECTIONS EnumTcpConnections;
+    GETDBGEVENTS GetDbgEvents;
+    MODGETPARTY ModGetParty;
+    MODSETPARTY ModSetParty;
+    WATCHISWATCHDOGTRIGGERED WatchIsWatchdogTriggered;
+    MEMISCODEPAGE MemIsCodePage;
+    ANIMATECOMMAND AnimateCommand;
+    DBGSETDEBUGGEEINITSCRIPT DbgSetDebuggeeInitScript;
+    DBGGETDEBUGGEEINITSCRIPT DbgGetDebuggeeInitScript;
+    HANDLESENUMWINDOWS EnumWindows;
+    HANDLESENUMHEAPS EnumHeaps;
+    THREADGETNAME ThreadGetName;
+    ISDEPENABLED IsDepEnabled;
+    GETCALLSTACKEX GetCallStackEx;
+    GETUSERCOMMENT GetUserComment;
+    ENUMCONSTANTS EnumConstants;
+    ENUMCONSTANTS EnumErrorCodes;
+    ENUMCONSTANTS EnumExceptions;
+    MEMBPSIZE MemBpSize;
+    MODRELOCATIONSFROMADDR ModRelocationsFromAddr;
+    MODRELOCATIONATADDR ModRelocationAtAddr;
+    MODRELOCATIONSINRANGE ModRelocationsInRange;
+    DBGETHASH DbGetHash;
 } DBGFUNCTIONS;
 
 #ifdef BUILD_DBG

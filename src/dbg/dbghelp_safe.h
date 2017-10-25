@@ -7,6 +7,9 @@
 #include <dbghelp.h>
 #endif //__GNUC__
 
+void SafeDbghelpInitialize();
+void SafeDbghelpDeinitialize();
+
 DWORD
 SafeUnDecorateSymbolName(
     __in PCSTR name,
@@ -27,6 +30,9 @@ SafeSymSetSearchPathW(
 DWORD
 SafeSymSetOptions(
     __in DWORD   SymOptions
+);
+DWORD
+SafeSymGetOptions(
 );
 BOOL
 SafeSymInitializeW(
@@ -72,17 +78,11 @@ SafeSymEnumSymbols(
     __in_opt PVOID UserContext
 );
 BOOL
-SafeSymEnumerateModules64(
-    __in HANDLE hProcess,
-    __in PSYM_ENUMMODULES_CALLBACK64 EnumModulesCallback,
-    __in_opt PVOID UserContext
-);
-BOOL
-SafeSymGetLineFromAddr64(
+SafeSymGetLineFromAddrW64(
     __in HANDLE hProcess,
     __in DWORD64 qwAddr,
     __out PDWORD pdwDisplacement,
-    __out PIMAGEHLP_LINE64 Line64
+    __out PIMAGEHLP_LINEW64 Line64
 );
 BOOL
 SafeSymFromName(
@@ -100,6 +100,18 @@ SafeSymFromAddr(
 BOOL
 SafeSymCleanup(
     __in HANDLE hProcess
+);
+BOOL
+SafeStackWalk64(
+    __in DWORD MachineType,
+    __in HANDLE hProcess,
+    __in HANDLE hThread,
+    __inout LPSTACKFRAME64 StackFrame,
+    __inout PVOID ContextRecord,
+    __in_opt PREAD_PROCESS_MEMORY_ROUTINE64 ReadMemoryRoutine,
+    __in_opt PFUNCTION_TABLE_ACCESS_ROUTINE64 FunctionTableAccessRoutine,
+    __in_opt PGET_MODULE_BASE_ROUTINE64 GetModuleBaseRoutine,
+    __in_opt PTRANSLATE_ADDRESS_ROUTINE64 TranslateAddress
 );
 
 #endif //_DBGHELP_SAFE_H

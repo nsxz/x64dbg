@@ -1,7 +1,7 @@
 #ifndef _CAPSTONE_GUI_H
 #define _CAPSTONE_GUI_H
 
-#include <capstone_wrapper.h>
+#include <zydis_wrapper.h>
 #include "RichTextPainter.h"
 #include "Configuration.h"
 #include <map>
@@ -21,8 +21,6 @@ public:
         //general instruction parts
         Prefix,
         Uncategorized,
-        Address, //jump/call destinations or displacements inside memory
-        Value,
         //mnemonics
         MnemonicNormal,
         MnemonicPushPop,
@@ -34,6 +32,9 @@ public:
         MnemonicFar,
         MnemonicInt3,
         MnemonicUnusual,
+        //values
+        Address, //jump/call destinations or displacements inside memory
+        Value,
         //memory
         MemorySize,
         MemorySegment,
@@ -49,7 +50,9 @@ public:
         MmxRegister,
         XmmRegister,
         YmmRegister,
-        ZmmRegister
+        ZmmRegister,
+        //last
+        Last
     };
 
     struct TokenValue
@@ -67,6 +70,11 @@ public:
             size(0),
             value(0)
         {
+        }
+
+        bool operator == (const TokenValue & rhs) const
+        {
+            return /*size == rhs.size &&*/ value == rhs.value;
         }
     };
 
@@ -91,6 +99,11 @@ public:
         SingleToken(TokenType type, const QString & text) :
             SingleToken(type, text, TokenValue())
         {
+        }
+
+        bool operator == (const SingleToken & rhs) const
+        {
+            return type == rhs.type && text == rhs.text && value == rhs.value;
         }
     };
 
@@ -133,14 +146,20 @@ public:
             else
                 this->flags = RichTextPainter::FlagNone;
         }
+
+        TokenColor()
+            : TokenColor("", "")
+        {
+        }
     };
 
     CapstoneTokenizer(int maxModuleLength);
     bool Tokenize(duint addr, const unsigned char* data, int datasize, InstructionToken & instruction);
+    bool TokenizeData(const QString & datatype, const QString & data, InstructionToken & instruction);
     void UpdateConfig();
-    void SetConfig(bool bUppercase, bool bTabbedMnemonic, bool bArgumentSpaces, bool bMemorySpaces);
+    void SetConfig(bool bUppercase, bool bTabbedMnemonic, bool bArgumentSpaces, bool bMemorySpaces, bool bNoHighlightOperands, bool bNoCurrentModuleText, bool b0xPrefixValues);
     int Size() const;
-    const Capstone & GetCapstone() const;
+    const Zydis & GetCapstone() const;
 
     static void UpdateColors();
     static void UpdateStringPool();
@@ -148,13 +167,13 @@ public:
     static bool TokenFromX(const InstructionToken & instr, SingleToken & token, int x, CachedFontMetrics* fontMetrics);
     static bool IsHighlightableToken(const SingleToken & token);
     static bool TokenEquals(const SingleToken* a, const SingleToken* b, bool ignoreSize = true);
-
-private:
     static void addColorName(TokenType type, QString color, QString backgroundColor);
     static void addStringsToPool(const QString & regs);
     static bool tokenTextPoolEquals(const QString & a, const QString & b);
 
-    Capstone _cp;
+private:
+    Zydis _cp;
+    bool isNop;
     InstructionToken _inst;
     bool _success;
     int _maxModuleLength;
@@ -162,24 +181,27 @@ private:
     bool _bTabbedMnemonic;
     bool _bArgumentSpaces;
     bool _bMemorySpaces;
+    bool _bNoHighlightOperands;
+    bool _bNoCurrentModuleText;
+    bool _b0xPrefixValues;
+    TokenType _mnemonicType;
 
     void addToken(TokenType type, QString text, const TokenValue & value);
     void addToken(TokenType type, const QString & text);
     void addMemoryOperator(char operatorText);
     QString printValue(const TokenValue & value, bool expandModule, int maxModuleLength) const;
 
-    static std::map<TokenType, TokenColor> colorNamesMap;
     static QHash<QString, int> stringPoolMap;
     static int poolId;
 
     bool tokenizePrefix();
     bool tokenizeMnemonic();
-    bool tokenizeOperand(const cs_x86_op & op);
-    bool tokenizeRegOperand(const cs_x86_op & op);
-    bool tokenizeImmOperand(const cs_x86_op & op);
-    bool tokenizeMemOperand(const cs_x86_op & op);
-    bool tokenizeFpOperand(const cs_x86_op & op);
-    bool tokenizeInvalidOperand(const cs_x86_op & op);
+    bool tokenizeMnemonic(TokenType type, const QString & mnemonic);
+    bool tokenizeOperand(const ZydisDecodedOperand & op);
+    bool tokenizeRegOperand(const ZydisDecodedOperand & op);
+    bool tokenizeImmOperand(const ZydisDecodedOperand & op);
+    bool tokenizeMemOperand(const ZydisDecodedOperand & op);
+    bool tokenizeInvalidOperand(const ZydisDecodedOperand & op);
 };
 
 #endif //_CAPSTONE_GUI_H

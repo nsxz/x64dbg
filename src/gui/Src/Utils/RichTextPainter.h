@@ -3,8 +3,10 @@
 
 #include <QString>
 #include <QColor>
-#include <QPainter>
-#include "CachedFontMetrics.h"
+#include <vector>
+
+class CachedFontMetrics;
+class QPainter;
 
 class RichTextPainter
 {
@@ -18,7 +20,7 @@ public:
         FlagAll
     };
 
-    typedef struct _CustomRichText_t
+    struct CustomRichText_t
     {
         QString text;
         QColor textColor;
@@ -26,12 +28,15 @@ public:
         CustomRichTextFlags flags;
         bool highlight;
         QColor highlightColor;
-    } CustomRichText_t;
+        int highlightWidth = 2;
+        bool highlightConnectPrev = false;
+    };
 
     typedef std::vector<CustomRichText_t> List;
 
     //functions
     static void paintRichText(QPainter* painter, int x, int y, int w, int h, int xinc, const List & richText, CachedFontMetrics* fontMetrics);
+    static void htmlRichText(const List & richText, QString & textHtml, QString & textPlain);
 };
 
 #endif // RICHTEXTPAINTER_H

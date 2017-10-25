@@ -1,3 +1,4 @@
+#include <ntstatus.h>
 #include "threading.h"
 
 static HANDLE waitArray[WAITID_LAST];
@@ -11,6 +12,11 @@ void waitclear()
 void wait(WAIT_ID id)
 {
     WaitForSingleObject(waitArray[id], INFINITE);
+}
+
+bool waitfor(WAIT_ID id, unsigned int Milliseconds)
+{
+    return WaitForSingleObject(waitArray[id], Milliseconds) == 0;
 }
 
 void lock(WAIT_ID id)
@@ -46,6 +52,8 @@ void waitdeinitialize()
 bool SectionLockerGlobal::m_Initialized = false;
 bool SectionLockerGlobal::m_SRWLocks = false;
 SRWLOCK SectionLockerGlobal::m_srwLocks[SectionLock::LockLast];
+SectionLockerGlobal::owner_info SectionLockerGlobal::m_owner[SectionLock::LockLast];
+
 CRITICAL_SECTION SectionLockerGlobal::m_crLocks[SectionLock::LockLast];
 SectionLockerGlobal::SRWLOCKFUNCTION SectionLockerGlobal::m_InitializeSRWLock;
 SectionLockerGlobal::SRWLOCKFUNCTION SectionLockerGlobal::m_AcquireSRWLockShared;

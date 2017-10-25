@@ -2,15 +2,15 @@
 #define CPUWIDGET_H
 
 #include <QWidget>
-#include <QTabWidget>
-#include <QVBoxLayout>
-#include "CPUSideBar.h"
-#include "CPUDisassembly.h"
-#include "CPUMultiDump.h"
-#include "CPUStack.h"
-#include "RegistersView.h"
-#include "CPUInfoBox.h"
-#include "CPUArgumentWidget.h"
+
+class QVBoxLayout;
+class CPUSideBar;
+class CPUDisassembly;
+class CPUMultiDump;
+class CPUStack;
+class RegistersView;
+class CPUInfoBox;
+class CPUArgumentWidget;
 
 namespace Ui
 {
@@ -29,18 +29,15 @@ public:
     void setDefaultDisposition();
     void setDisasmFocus();
 
-    // Layout getters
-    QVBoxLayout* getTopLeftUpperWidget();
-    QVBoxLayout* getTopLeftLowerWidget();
-    QVBoxLayout* getTopRightWidget();
-    QVBoxLayout* getBotLeftWidget();
-    QVBoxLayout* getBotRightWidget();
+    void saveWindowSettings();
+    void loadWindowSettings();
 
     // Widget getters
     CPUSideBar* getSidebarWidget();
     CPUDisassembly* getDisasmWidget();
     CPUMultiDump* getDumpWidget();
     CPUStack* getStackWidget();
+    CPUInfoBox* getInfoBoxWidget();
 
 protected:
     CPUSideBar* mSideBar;
@@ -53,6 +50,9 @@ protected:
 
 private:
     Ui::CPUWidget* ui;
+
+private slots:
+    void splitterMoved(int pos, int index);
 };
 
 #endif // CPUWIDGET_H

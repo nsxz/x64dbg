@@ -36,10 +36,11 @@ SCRIPTLINETYPE scriptgetlinetype(int line);
 void scriptsetip(int line);
 void scriptreset();
 bool scriptgetbranchinfo(int line, SCRIPTBRANCH* info);
+void scriptlog(const char* msg);
+DWORD WINAPI scriptLoadSync(void* filename); // Load script synchronized
+DWORD WINAPI scriptRunSync(void* arg);
 
 //script commands
-CMDRESULT cbScriptLoad(int argc, char* argv[]);
-CMDRESULT cbScriptMsg(int argc, char* argv[]);
-CMDRESULT cbScriptMsgyn(int argc, char* argv[]);
+
 
 #endif // _SIMPLESCRIPT_H

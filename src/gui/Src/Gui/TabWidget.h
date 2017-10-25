@@ -5,9 +5,6 @@
 #include <QWidget>
 #include <QTabWidget>
 #include <QMainWindow>
-#include <QMoveEvent>
-#include <QApplication>
-#include <QDesktopWidget>
 #include "TabBar.h"
 
 // Qt forward class definitions
@@ -32,12 +29,15 @@ public:
 
     int addTabEx(QWidget* widget, const QIcon & icon, const QString & label, const QString & nativeName);
     QString getNativeName(int index);
+    void showPreviousTab();
+    void showNextTab();
+    void deleteCurrentTab();
 signals:
     void tabMovedTabWidget(int from, int to);
 
 public slots:
     void AttachTab(QWidget* parent);
-    void DetachTab(int index, QPoint &);
+    void DetachTab(int index, const QPoint &);
     void MoveTab(int fromIndex, int toIndex);
     void DeleteTab(int index);
     void tabMoved(int from, int to);

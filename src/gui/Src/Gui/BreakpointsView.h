@@ -2,96 +2,109 @@
 #define BREAKPOINTSVIEW_H
 
 #include <QWidget>
-#include <QVBoxLayout>
-#include <QSplitter>
+#include "Bridge.h"
 #include "StdTable.h"
+#include "QBeaEngine.h"
 
-class BreakpointsView : public QWidget
+class MenuBuilder;
+
+class BreakpointsView : public StdTable
 {
     Q_OBJECT
 public:
     explicit BreakpointsView(QWidget* parent = 0);
-    void setupRightClickContextMenu();
-    void setupHardBPRightClickContextMenu();
-    void setupSoftBPRightClickContextMenu();
-    void setupMemBPRightClickContextMenu();
 
-signals:
-    void showCpu();
+protected:
+    void setupContextMenu();
+    void updateColors() override;
+    void reloadData() override;
+    QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h) override;
 
-public slots:
-    void refreshShortcutsSlot();
-    void reloadData();
-
-    // Hardware
-    void hardwareBPContextMenuSlot(const QPoint & pos);
-    void removeHardBPActionSlot();
-    void removeAllHardBPActionSlot();
-    void enableDisableHardBPActionSlot();
-    void enableAllHardBPActionSlot();
-    void disableAllHardBPActionSlot();
-    void doubleClickHardwareSlot();
-    void selectionChangedHardwareSlot();
-    void resetHardwareHitCountSlot();
-
-    // Software
-    void softwareBPContextMenuSlot(const QPoint & pos);
-    void removeSoftBPActionSlot();
-    void removeAllSoftBPActionSlot();
-    void enableDisableSoftBPActionSlot();
-    void enableAllSoftBPActionSlot();
-    void disableAllSoftBPActionSlot();
-    void doubleClickSoftwareSlot();
-    void selectionChangedSoftwareSlot();
-    void resetSoftwareHitCountSlot();
-
-    // Memory
-    void memoryBPContextMenuSlot(const QPoint & pos);
-    void removeMemBPActionSlot();
-    void removeAllMemBPActionSlot();
-    void enableDisableMemBPActionSlot();
-    void enableAllMemBPActionSlot();
-    void disableAllMemBPActionSlot();
-    void doubleClickMemorySlot();
-    void selectionChangedMemorySlot();
-    void resetMemoryHitCountSlot();
-
-    // Conditional
+private slots:
+    void updateBreakpointsSlot();
+    void disassembleAtSlot(dsint addr, dsint cip);
+    void tokenizerConfigUpdatedSlot();
+    void contextMenuSlot(const QPoint & pos);
+    void followBreakpointSlot();
+    void removeBreakpointSlot();
+    void toggleBreakpointSlot();
     void editBreakpointSlot();
+    void resetHitCountBreakpointSlot();
+    void enableAllBreakpointsSlot();
+    void disableAllBreakpointsSlot();
+    void removeAllBreakpointsSlot();
+    void addDllBreakpointSlot();
+    void addExceptionBreakpointSlot();
 
 private:
-    QVBoxLayout* mVertLayout;
-    QSplitter* mSplitter ;
-    StdTable* mHardBPTable;
-    StdTable* mSoftBPTable;
-    StdTable* mMemBPTable;
-    // Conditional BP Context Menu
-    BPXTYPE mCurrentType;
-    QAction* mEditBreakpointAction;
+    enum
+    {
+        ColType,
+        ColAddr,
+        ColModLabel,
+        ColState,
+        ColDisasm,
+        ColHits,
+        ColSummary
+    };
 
-    // Hardware BP Context Menu
-    QAction* mHardBPRemoveAction;
-    QAction* mHardBPRemoveAllAction;
-    QAction* mHardBPEnableDisableAction;
-    QAction* mHardBPResetHitCountAction;
-    QAction* mHardBPEnableAllAction;
-    QAction* mHardBPDisableAllAction;
+    std::unordered_map<duint, const char*> mExceptionMap;
+    QStringList mExceptionList;
+    int mExceptionMaxLength;
+    std::vector<BRIDGEBP> mBps;
+    std::vector<std::pair<RichTextPainter::List, RichTextPainter::List>> mRich;
+    QColor mDisasmBackgroundColor;
+    QColor mDisasmSelectionColor;
+    QColor mCipBackgroundColor;
+    QColor mCipColor;
+    QColor mSummaryParenColor;
+    QColor mSummaryKeywordColor;
+    QColor mSummaryStringColor;
+    duint mCip = 0;
+    MenuBuilder* mMenuBuilder;
+    QAction* mEnableDisableAction;
+    QBeaEngine* mDisasm;
 
-    // Software BP Context Menu
-    QAction* mSoftBPRemoveAction;
-    QAction* mSoftBPRemoveAllAction;
-    QAction* mSoftBPEnableDisableAction;
-    QAction* mSoftBPResetHitCountAction;
-    QAction* mSoftBPEnableAllAction;
-    QAction* mSoftBPDisableAllAction;
+    const int bpIndex(int i)
+    {
+        return mData.at(i).at(ColAddr).userdata;
+    }
 
-    // Memory BP Context Menu
-    QAction* mMemBPRemoveAction;
-    QAction* mMemBPRemoveAllAction;
-    QAction* mMemBPEnableDisableAction;
-    QAction* mMemBPResetHitCountAction;
-    QAction* mMemBPEnableAllAction;
-    QAction* mMemBPDisableAllAction;
+    const BRIDGEBP & selectedBp(int index = -1)
+    {
+        if(index == -1)
+            index = getInitialSelection();
+        return mBps.at(bpIndex(index));
+    }
+
+    bool isValidBp(int sel = -1)
+    {
+        if(sel == -1)
+            sel = getInitialSelection();
+        if(!DbgIsDebugging() || mBps.empty() || !isValidIndex(sel, ColType))
+            return false;
+        auto & bp = mBps.at(bpIndex(sel));
+        return bp.addr != 0 || bp.active;
+    }
+
+    QString bpTypeName(BPXTYPE type)
+    {
+        switch(type)
+        {
+        case bp_normal:
+            return tr("Software");
+        case bp_hardware:
+            return tr("Hardware");
+        case bp_memory:
+            return tr("Memory");
+        case bp_dll:
+            return tr("DLL");
+        case bp_exception:
+            return tr("Exception");
+        default:
+            return QString();
+        }
+    }
 };
 
 #endif // BREAKPOINTSVIEW_H

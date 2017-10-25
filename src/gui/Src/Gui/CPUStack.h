@@ -2,10 +2,10 @@
 #define CPUSTACK_H
 
 #include "HexDump.h"
-#include "GotoDialog.h"
 
 //forward declaration
 class CPUMultiDump;
+class GotoDialog;
 
 class CPUStack : public HexDump
 {
@@ -28,20 +28,23 @@ signals:
     void displayReferencesWidget();
 
 public slots:
-    void refreshShortcutsSlot();
+    void pushSlot();
+    void popSlot();
     void stackDumpAt(duint addr, duint csp);
-    void gotoSpSlot();
-    void gotoBpSlot();
+    void gotoCspSlot();
+    void gotoCbpSlot();
     void gotoExpressionSlot();
-    void gotoPreviousSlot();
-    void gotoNextSlot();
+    void gotoPreviousFrameSlot();
+    void gotoNextFrameSlot();
+    void gotoFrameBaseSlot();
     void selectionGet(SELECTIONDATA* selection);
     void selectionSet(const SELECTIONDATA* selection);
     void selectionUpdatedSlot();
     void followDisasmSlot();
-    void followDumpSlot();
+    void followDumpPtrSlot();
     void followinDumpNSlot();
     void followStackSlot();
+    void watchDataSlot();
     void binaryEditSlot();
     void binaryFillSlot();
     void binaryCopySlot();
@@ -64,60 +67,39 @@ public slots:
     void binaryPasteIgnoreSizeSlot();
     void undoSelectionSlot();
     void modifySlot();
+    void realignSlot();
     void freezeStackSlot();
     void dbgStateChangedSlot(DBGSTATE state);
+    void followInMemoryMapSlot();
+    void followInDumpSlot();
+    void updateSlot();
 
 private:
     duint mCsp;
     bool bStackFrozen;
 
-    QMenu* mBinaryMenu;
-    QAction* mBinaryEditAction;
-    QAction* mBinaryFillAction;
-    QAction* mBinaryCopyAction;
-    QAction* mBinaryPasteAction;
-    QAction* mBinaryPasteIgnoreSizeAction;
-    QMenu* mBreakpointMenu;
-    QMenu* mBreakpointHardwareAccessMenu;
-    QAction* mBreakpointHardwareAccess1;
-    QAction* mBreakpointHardwareAccess2;
-    QAction* mBreakpointHardwareAccess4;
-#ifdef _WIN64
-    QAction* mBreakpointHardwareAccess8;
-#endif //_WIN64
-    QMenu* mBreakpointHardwareWriteMenu;
-    QAction* mBreakpointHardwareWrite1;
-    QAction* mBreakpointHardwareWrite2;
-    QAction* mBreakpointHardwareWrite4;
-#ifdef _WIN64
-    QAction* mBreakpointHardwareWrite8;
-#endif //_WIN64
-    QAction* mBreakpointHardwareRemove;
-    QMenu* mBreakpointMemoryAccessMenu;
-    QMenu* mBreakpointMemoryWriteMenu;
-    QAction* mBreakpointMemoryAccessSingleshoot;
-    QAction* mBreakpointMemoryAccessRestore;
-    QAction* mBreakpointMemoryWriteSingleShoot;
-    QAction* mBreakpointMemoryWriteRestore;
-    QAction* mBreakpointMemoryRemove;
-    QAction* mModifyAction;
-    QAction* mUndoSelection;
-    QAction* mGotoSp;
-    QAction* mGotoBp;
     QAction* mFreezeStack;
-    QAction* mGotoExpression;
-    QAction* mGotoPrevious;
-    QAction* mGotoNext;
-    QAction* mFindPatternAction;
-    QAction* mFollowDisasm;
-    QAction* mFollowDump;
     QAction* mFollowStack;
-    QMenu* mPluginMenu;
-    QMenu* mFollowInDumpMenu;
+    QAction* mFollowDisasm;
     QList<QAction*> mFollowInDumpActions;
+    QMenu* mPluginMenu;
 
     GotoDialog* mGoto;
     CPUMultiDump* mMultiDump;
+    QColor mUserStackFrameColor;
+    QColor mSystemStackFrameColor;
+    QColor mStackReturnToColor;
+    QColor mStackSEHChainColor;
+    struct CPUCallStack
+    {
+        duint addr;
+        int party;
+    };
+
+    MenuBuilder* mMenuBuilder;
+
+    std::vector<CPUCallStack> mCallstack;
+    static int CPUStack::getCurrentFrame(const std::vector<CPUStack::CPUCallStack> & mCallstack, duint wVA);
 };
 
 #endif // CPUSTACK_H

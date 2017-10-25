@@ -7,8 +7,21 @@
 #include "thread.h"
 #include "memory.h"
 #include "threading.h"
+#include "ntdll/ntdll.h"
+#include "debugger.h"
 
 static std::unordered_map<DWORD, THREADINFO> threadList;
+static std::unordered_map<DWORD, THREADWAITREASON> threadWaitReasons;
+
+// Function pointer for dynamic linking. Do not link statically for Windows XP compatibility.
+// TODO: move this function definition out of thread.cpp
+BOOL(WINAPI* QueryThreadCycleTime)(HANDLE ThreadHandle, PULONG64 CycleTime) = nullptr;
+
+BOOL WINAPI QueryThreadCycleTimeUnsupported(HANDLE ThreadHandle, PULONG64 CycleTime)
+{
+    *CycleTime = 0;
+    return TRUE;
+}
 
 void ThreadCreate(CREATE_THREAD_DEBUG_INFO* CreateThread)
 {
@@ -26,7 +39,9 @@ void ThreadCreate(CREATE_THREAD_DEBUG_INFO* CreateThread)
 
     // The first thread (#0) is always the main program thread
     if(curInfo.ThreadNumber <= 0)
-        strcpy_s(curInfo.threadName, "Main Thread");
+        strcpy_s(curInfo.threadName, GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Main Thread")));
+    else
+        curInfo.threadName[0] = 0;
 
     // Modify global thread list
     EXCLUSIVE_ACQUIRE(LockThreads);
@@ -97,6 +112,9 @@ void ThreadGetList(THREADLIST* List)
     // Fill out the list data
     int index = 0;
 
+    // Unused thread exit time
+    FILETIME threadExitTime;
+
     for(auto & itr : threadList)
     {
         HANDLE threadHandle = itr.second.Handle;
@@ -110,10 +128,40 @@ void ThreadGetList(THREADLIST* List)
         List->list[index].ThreadCip = GetContextDataEx(threadHandle, UE_CIP);
         List->list[index].SuspendCount = ThreadGetSuspendCount(threadHandle);
         List->list[index].Priority = ThreadGetPriority(threadHandle);
-        List->list[index].WaitReason = ThreadGetWaitReason(threadHandle);
         List->list[index].LastError = ThreadGetLastErrorTEB(itr.second.ThreadLocalBase);
+        GetThreadTimes(threadHandle, &List->list[index].CreationTime, &threadExitTime, &List->list[index].KernelTime, &List->list[index].UserTime);
+        List->list[index].Cycles = ThreadQueryCycleTime(threadHandle);
         index++;
     }
+
+    // Get the wait reason for every thread in the list
+    for(int i = 0; i < List->count; i++)
+    {
+        auto found = threadWaitReasons.find(List->list[i].BasicInfo.ThreadId);
+        if(found != threadWaitReasons.end())
+            List->list[i].WaitReason = found->second;
+    }
+}
+
+void ThreadGetList(std::vector<THREADINFO> & list)
+{
+    SHARED_ACQUIRE(LockThreads);
+    list.clear();
+    list.reserve(threadList.size());
+    for(const auto & thread : threadList)
+        list.push_back(thread.second);
+}
+
+bool ThreadGetInfo(DWORD ThreadId, THREADINFO & info)
+{
+    SHARED_ACQUIRE(LockThreads);
+
+    auto found = threadList.find(ThreadId);
+    if(found == threadList.end())
+        return false;
+
+    info = found->second;
+    return true;
 }
 
 bool ThreadIsValid(DWORD ThreadId)
@@ -125,16 +173,16 @@ bool ThreadIsValid(DWORD ThreadId)
 bool ThreadGetTib(duint TEBAddress, NT_TIB* Tib)
 {
     // Calculate offset from structure member
-    TEBAddress += offsetof(TEB, Tib);
+    TEBAddress += offsetof(TEB, NtTib);
 
     memset(Tib, 0, sizeof(NT_TIB));
-    return MemRead(TEBAddress, Tib, sizeof(NT_TIB));
+    return MemReadUnsafe(TEBAddress, Tib, sizeof(NT_TIB));
 }
 
 bool ThreadGetTeb(duint TEBAddress, TEB* Teb)
 {
     memset(Teb, 0, sizeof(TEB));
-    return MemRead(TEBAddress, Teb, sizeof(TEB));
+    return MemReadUnsafe(TEBAddress, Teb, sizeof(TEB));
 }
 
 int ThreadGetSuspendCount(HANDLE Thread)
@@ -159,21 +207,13 @@ THREADPRIORITY ThreadGetPriority(HANDLE Thread)
     return (THREADPRIORITY)GetThreadPriority(Thread);
 }
 
-THREADWAITREASON ThreadGetWaitReason(HANDLE Thread)
-{
-    UNREFERENCED_PARAMETER(Thread);
-
-    // TODO: Implement this
-    return _Executive;
-}
-
 DWORD ThreadGetLastErrorTEB(ULONG_PTR ThreadLocalBase)
 {
     // Get the offset for the TEB::LastErrorValue and read it
     DWORD lastError = 0;
     duint structOffset = ThreadLocalBase + offsetof(TEB, LastErrorValue);
 
-    MemRead(structOffset, &lastError, sizeof(DWORD));
+    MemReadUnsafe(structOffset, &lastError, sizeof(DWORD));
     return lastError;
 }
 
@@ -198,10 +238,27 @@ bool ThreadSetName(DWORD ThreadId, const char* Name)
         if(!Name)
             Name = "";
 
-        strcpy_s(threadList[ThreadId].threadName, Name);
+        strncpy_s(threadList[ThreadId].threadName, Name, _TRUNCATE);
         return true;
     }
 
+    return false;
+}
+
+/**
+@brief ThreadGetName Get the name of the thread.
+@param ThreadId The id of the thread.
+@param Name The returned name of the thread. Must be at least MAX_THREAD_NAME_SIZE size
+@return True if the function succeeds. False otherwise.
+*/
+bool ThreadGetName(DWORD ThreadId, char* Name)
+{
+    SHARED_ACQUIRE(LockThreads);
+    if(threadList.find(ThreadId) != threadList.end())
+    {
+        strcpy_s(Name, MAX_THREAD_NAME_SIZE, threadList[ThreadId].threadName);
+        return true;
+    }
     return false;
 }
 
@@ -212,7 +269,6 @@ HANDLE ThreadGetHandle(DWORD ThreadId)
     if(threadList.find(ThreadId) != threadList.end())
         return threadList[ThreadId].Handle;
 
-    ASSERT_ALWAYS("Trying to get handle of a thread that doesn't exist!");
     return nullptr;
 }
 
@@ -243,6 +299,8 @@ int ThreadSuspendAll()
     {
         if(SuspendThread(entry.second.Handle) != -1)
             count++;
+        else
+            dprintf(QT_TRANSLATE_NOOP("DBG", "Failed to suspend thread 0x%X...\n"), entry.second.ThreadId);
     }
 
     return count;
@@ -268,4 +326,48 @@ ULONG_PTR ThreadGetLocalBase(DWORD ThreadId)
     SHARED_ACQUIRE(LockThreads);
     auto found = threadList.find(ThreadId);
     return found != threadList.end() ? found->second.ThreadLocalBase : 0;
+}
+
+ULONG64 ThreadQueryCycleTime(HANDLE hThread)
+{
+    ULONG64 CycleTime;
+
+    // Initialize function pointer
+    if(QueryThreadCycleTime == nullptr)
+    {
+        QueryThreadCycleTime = (BOOL(WINAPI*)(HANDLE, PULONG64))GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "QueryThreadCycleTime");
+        if(QueryThreadCycleTime == nullptr)
+            QueryThreadCycleTime = QueryThreadCycleTimeUnsupported;
+    }
+
+    if(!QueryThreadCycleTime(hThread, &CycleTime))
+        CycleTime = 0;
+    return CycleTime;
+}
+
+void ThreadUpdateWaitReasons()
+{
+    ULONG size;
+    if(NtQuerySystemInformation(SystemProcessInformation, NULL, 0, &size) != STATUS_INFO_LENGTH_MISMATCH)
+        return;
+    Memory<PSYSTEM_PROCESS_INFORMATION> systemProcessInfo(2 * size, "_dbg_threadwaitreason");
+    NTSTATUS status = NtQuerySystemInformation(SystemProcessInformation, systemProcessInfo(), (ULONG)systemProcessInfo.size(), NULL);
+    if(!NT_SUCCESS(status))
+        return;
+
+    PSYSTEM_PROCESS_INFORMATION process = systemProcessInfo();
+
+    EXCLUSIVE_ACQUIRE(LockThreads);
+    while(true)
+    {
+        for(ULONG thread = 0; thread < process->NumberOfThreads; ++thread)
+        {
+            auto tid = (DWORD)process->Threads[thread].ClientId.UniqueThread;
+            if(threadList.count(tid))
+                threadWaitReasons[tid] = (THREADWAITREASON)process->Threads[thread].WaitReason;
+        }
+        if(process->NextEntryOffset == 0) // Last entry
+            break;
+        process = (PSYSTEM_PROCESS_INFORMATION)((ULONG_PTR)process + process->NextEntryOffset);
+    }
 }

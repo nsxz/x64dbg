@@ -14,6 +14,8 @@ class CommandLineEdit : public HistoryLineEdit
 
 public:
     explicit CommandLineEdit(QWidget* parent = 0);
+    ~CommandLineEdit();
+
     void keyPressEvent(QKeyEvent* event);
     bool focusNextPrevChild(bool next);
 
@@ -28,6 +30,7 @@ public slots:
     void registerScriptType(SCRIPTTYPEINFO* info);
     void unregisterScriptType(int id);
     void scriptTypeChanged(int index);
+    void fontsUpdated();
 
 private:
     QComboBox* mCmdScriptType;

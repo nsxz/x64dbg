@@ -1,6 +1,8 @@
 # x64dbg
 
-[![BountySource](https://www.bountysource.com/badge/team?team_id=18188&style=raised)](https://www.bountysource.com/teams/x64dbg?utm_source=x64dbg&utm_medium=shield&utm_campaign=raised) [![Telegram](http://i.imgur.com/merFyCf.png)](https://telegram.me/joinchat/BzwLaQcORqjkM1k9YbTNmg) [![Join the chat at Gitter](https://badges.gitter.im/x64dbg/x64dbg.svg)](https://gitter.im/x64dbg/x64dbg?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge) [![freenode](http://i.imgur.com/JEG5fJr.png)](http://webchat.freenode.net/?channels=x64dbg) [![Jenkins](http://jenkins.x64dbg.com/job/vs13/badge/icon)](http://jenkins.x64dbg.com) [![coverity](https://scan.coverity.com/projects/7478/badge.svg?flat=1)](https://scan.coverity.com/projects/7478/badge.svg?flat=1)
+[![BountySource](https://www.bountysource.com/badge/team?team_id=18188&style=raised)](https://www.bountysource.com/teams/x64dbg?utm_source=x64dbg&utm_medium=shield&utm_campaign=raised) [![Build status](https://ci.appveyor.com/api/projects/status/h1j489qa1mx67e0h?svg=true)](https://ci.appveyor.com/project/mrexodia/x64dbg) [![coverity](https://scan.coverity.com/projects/7478/badge.svg?flat=1)](https://scan.coverity.com/projects/7478) [![Crowdin](https://d322cqt584bo4o.cloudfront.net/x64dbg/localized.svg)](http://translate.x64dbg.com)
+
+[![Telegram](https://img.shields.io/badge/chat-%20on%20Telegram-blue.svg)](http://telegram.x64dbg.com) [![Join the chat at Gitter](https://badges.gitter.im/x64dbg/x64dbg.svg)](http://gitter.x64dbg.com) [![freenode](https://img.shields.io/badge/chat-%20on%20freenode-brightgreen.svg)](http://webchat.freenode.net/?channels=x64dbg) [![Download x64dbg](https://img.shields.io/sourceforge/dm/x64dbg.svg)](https://sourceforge.net/projects/x64dbg/files/latest/download)
 
 ## Note
 
@@ -8,13 +10,11 @@ Please run `install.bat` before you start committing code, this ensures your cod
 
 ## Compiling
 
-For a complete guide on compiling *x64dbg* read [this](https://github.com/x64dbg/x64dbg/wiki/Compiling the whole project).
+For a complete guide on compiling *x64dbg* read [this](https://github.com/x64dbg/x64dbg/wiki/Compiling-the-whole-project).
 
 ## Downloads
 
 Releases of *x64dbg* can be found [here](http://releases.x64dbg.com).
-
-Jenkins build server can be found [here](http://jenkins.x64dbg.com).
 
 ## Overview
 
@@ -47,7 +47,7 @@ Jenkins build server can be found [here](http://jenkins.x64dbg.com).
 - Multi-datatype memory dump
 - Basic debug symbol (PDB) support
 - Dynamic stack view
-- Built-in assembler (XEDParse)
+- Built-in assembler (XEDParse/Keystone/asmjit)
 - Executable patching
 - Yara Pattern Matching
 - Decompiler (Snowman)
@@ -61,10 +61,12 @@ Jenkins build server can be found [here](http://jenkins.x64dbg.com).
 
 - Debugger core by [TitanEngine Community Edition](https://bitbucket.org/titanengineupdate/titanengine-update)
 - Disassembly powered by [Capstone](http://capstone-engine.org)
-- Assembly powered by [XEDParse](https://bitbucket.org/mrexodia/xedparse)
+- Assembly powered by [XEDParse](https://github.com/x64dbg/XEDParse), [Keystone](http://keystone-engine.org) and [asmjit](https://github.com/asmjit)
 - Import reconstruction powered by [Scylla](https://github.com/NtQuery/Scylla)
 - JSON powered by [Jansson](http://www.digip.org/jansson)
 - Database compression powered by [lz4](https://bitbucket.org/mrexodia/lz4)
+- Advanced pattern matching powered by [yara](http://virustotal.github.io/yara)
+- Decompilation powered by [snowman](https://derevenets.com)
 - Bug icon by [VisualPharm](http://www.visualpharm.com)
 - Interface icons by [Fugue](http://p.yusukekamiyamane.com)
 - Website by [tr4ceflow](http://tr4ceflow.com)
@@ -88,6 +90,9 @@ Jenkins build server can be found [here](http://jenkins.x64dbg.com).
 - ahmadmansoor
 - \_pusher\_
 - firelegend
+- [kao](http://lifeinhex.com)
+- sstrato
+- [kobalicek](https://github.com/kobalicek)
 
 ## Developers
 
@@ -97,10 +102,10 @@ Jenkins build server can be found [here](http://jenkins.x64dbg.com).
 - [Dreg](http://www.fr33project.org)
 - [Nukem](https://github.com/Nukem9)
 - [Herz3h](https://github.com/Herz3h)
-
-## Contributers
-
 - [torusrxxx](https://github.com/torusrxxx)
+
+## Contributors
+
 - [blaquee](https://github.com/blaquee)
 - [wk-952](https://github.com/wk-952)
 - [RaMMicHaeL](http://rammichael.com)
@@ -112,9 +117,18 @@ Jenkins build server can be found [here](http://jenkins.x64dbg.com).
 - [Dither](https://github.com/Dither)
 - [zerosum0x0](https://github.com/zerosum0x0)
 - [RadicalRaccoon](https://github.com/RadicalRaccoon)
-- [fetzerms](https://github.com/RadicalRaccoon)
-- [muratsu](https://github.com/RadicalRaccoon)
-- [ForNeVeR](https://github.com/RadicalRaccoon)
+- [fetzerms](https://github.com/fetzerms)
+- [muratsu](https://github.com/muratsu)
+- [ForNeVeR](https://github.com/ForNeVeR)
 - [wynick27](https://github.com/wynick27)
 - [Atvaark](https://github.com/Atvaark)
 - [Avin](https://github.com/Avinm)
+- [mrfearless](https://github.com/mrfearless)
+- [Storm Shadow](https://github.com/techbliss)
+- [shamanas](https://github.com/shamanas)
+- [joesavage](https://github.com/joesavage)
+- [justanotheranonymoususer](https://github.com/justanotheranonymoususer)
+- [gushromp](https://github.com/gushromp)
+- [Forsari0](https://github.com/Forsari0)
+
+See [here](https://github.com/x64dbg/x64dbg/graphs/contributors) for a more up-to-date list of contributers.

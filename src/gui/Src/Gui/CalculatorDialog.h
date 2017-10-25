@@ -2,8 +2,9 @@
 #define CALCULATORDIALOG_H
 
 #include <QDialog>
-#include "ValidateExpressionThread.h"
 #include "Imports.h"
+
+class ValidateExpressionThread;
 
 namespace Ui
 {
@@ -35,7 +36,6 @@ public:
 
 signals:
     bool validAddress(bool valid);
-    void showCpu();
 
 private slots:
     void expressionChanged(bool validExpression, bool validPointer, dsint value);
@@ -47,6 +47,8 @@ private slots:
     void on_txtBin_textEdited(const QString & arg1);
     void on_txtAscii_textEdited(const QString & arg1);
     void on_txtUnicode_textEdited(const QString & arg1);
+    void on_txtAscii_clicked();
+    void on_txtUnicode_clicked();
     void on_txtExpression_textChanged(const QString & arg1);
 
     void on_btnGotoDump_clicked();

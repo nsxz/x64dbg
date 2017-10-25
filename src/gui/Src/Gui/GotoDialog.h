@@ -2,8 +2,9 @@
 #define GOTODIALOG_H
 
 #include <QDialog>
-#include "ValidateExpressionThread.h"
 #include "Imports.h"
+
+class ValidateExpressionThread;
 
 namespace Ui
 {
@@ -15,7 +16,7 @@ class GotoDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit GotoDialog(QWidget* parent = 0, bool allowInvalidExpression = false);
+    explicit GotoDialog(QWidget* parent = 0, bool allowInvalidExpression = false, bool allowInvalidAddress = false);
     ~GotoDialog();
     QString expressionText;
     duint validRangeStart;
@@ -23,6 +24,7 @@ public:
     bool fileOffset;
     QString modName;
     bool allowInvalidExpression;
+    bool allowInvalidAddress;
     void showEvent(QShowEvent* event);
     void hideEvent(QHideEvent* event);
     void validateExpression(QString expression);

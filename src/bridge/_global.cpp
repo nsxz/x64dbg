@@ -2,7 +2,7 @@
 
 GUIGUIINIT _gui_guiinit;
 GUISENDMESSAGE _gui_sendmessage;
-GUISENDMESSAGEASYNC _gui_sendmessageasync;
+GUITRANSLATETEXT _gui_translate_text;
 
 DBGDBGINIT _dbg_dbginit;
 DBGMEMFINDBASEADDR _dbg_memfindbaseaddr;
@@ -16,6 +16,7 @@ DBGISDEBUGGING _dbg_isdebugging;
 DBGISJUMPGOINGTOEXECUTE _dbg_isjumpgoingtoexecute;
 DBGADDRINFOGET _dbg_addrinfoget;
 DBGADDRINFOSET _dbg_addrinfoset;
+DBGENCODETYPESET _dbg_encodetypeset;
 DBGBPGETTYPEAT _dbg_bpgettypeat;
 DBGGETREGDUMP _dbg_getregdump;
 DBGVALTOSTRING _dbg_valtostring;

@@ -1,5 +1,7 @@
+#include <QVBoxLayout>
 #include "CommandHelpView.h"
 #include "ui_CommandHelpView.h"
+#include "SearchListView.h"
 
 CommandHelpView::CommandHelpView(QWidget* parent) : QWidget(parent), ui(new Ui::CommandHelpView)
 {
@@ -14,7 +16,7 @@ CommandHelpView::CommandHelpView(QWidget* parent) : QWidget(parent), ui(new Ui::
     setLayout(mMainLayout);
 
     // Create reference view
-    mSearchListView = new SearchListView();
+    mSearchListView = new SearchListView(true, this);
     mSearchListView->mSearchStartCol = 1;
 
     // Get font information
@@ -25,7 +27,7 @@ CommandHelpView::CommandHelpView(QWidget* parent) : QWidget(parent), ui(new Ui::
 
     // Create module list
     mModuleList = new StdTable();
-    mModuleList->addColumnAt(0, "Module", false);
+    mModuleList->addColumnAt(0, tr("Module"), true);
 
     // Setup symbol list
     mSearchListView->mList->addColumnAt(0, tr("Command"), true);
