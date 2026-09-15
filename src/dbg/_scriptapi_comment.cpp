@@ -29,9 +29,9 @@ SCRIPT_EXPORT bool Script::Comment::GetInfo(duint addr, CommentInfo* info)
         return false;
     if(info)
     {
-        strcpy_s(info->mod, comment.mod);
+        strcpy_s(info->mod, comment.mod().c_str());
         info->rva = comment.addr;
-        strcpy_s(info->text, comment.text);
+        strcpy_s(info->text, comment.text.c_str());
         info->manual = comment.manual;
     }
     return true;
@@ -49,7 +49,7 @@ SCRIPT_EXPORT void Script::Comment::DeleteRange(duint start, duint end)
 
 SCRIPT_EXPORT void Script::Comment::Clear()
 {
-    CommentClear();
+    CommentClear(false);
 }
 
 SCRIPT_EXPORT bool Script::Comment::GetList(ListOf(CommentInfo) list)
@@ -61,9 +61,9 @@ SCRIPT_EXPORT bool Script::Comment::GetList(ListOf(CommentInfo) list)
     for(const auto & comment : commentList)
     {
         CommentInfo scriptComment;
-        strcpy_s(scriptComment.mod, comment.mod);
+        strcpy_s(scriptComment.mod, comment.mod().c_str());
         scriptComment.rva = comment.addr;
-        strcpy_s(scriptComment.text, comment.text);
+        strcpy_s(scriptComment.text, comment.text.c_str());
         scriptComment.manual = comment.manual;
         commentScriptList.push_back(scriptComment);
     }

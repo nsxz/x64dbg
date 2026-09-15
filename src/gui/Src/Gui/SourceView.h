@@ -1,35 +1,67 @@
-#ifndef SOURCEVIEW_H
-#define SOURCEVIEW_H
+#pragma once
 
 #include <QWidget>
-#include <QMenu>
-#include <QAction>
-#include "StdTable.h"
+#include <AbstractStdTable.h>
 
-class SourceView : public StdTable
+class FileLines;
+class CommonActions;
+
+class SourceView : public AbstractStdTable
 {
     Q_OBJECT
 public:
-    explicit SourceView(QString path, int line = 0, StdTable* parent = 0);
+    SourceView(QString path, duint addr, QWidget* parent = nullptr);
+    ~SourceView();
+
+    QString getCellContent(duint row, duint column) override;
+    duint getCellUserdata(duint row, duint column) override;
+    bool isValidIndex(duint row, duint column) override;
+    void sortRows(duint column, bool ascending) override;
+    void prepareData() override;
+
     QString getSourcePath();
-    void setInstructionPointer(int line);
-    QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h);
-    void setupContextMenu();
-    void setSelection(int line);
+    void setSelection(duint addr);
+    void clear();
 
-signals:
-    void showCpu();
-
-public slots:
+private slots:
     void contextMenuSlot(const QPoint & pos);
-    void followInDisasmSlot();
+    void gotoLineSlot();
+    void openSourceFileSlot();
+    void showInDirectorySlot();
 
 private:
-    QAction* mFollowInDisasm;
-
+    MenuBuilder* mMenuBuilder = nullptr;
+    CommonActions* mCommonActions = nullptr;
     QString mSourcePath;
-    int mIpLine;
-    void loadFile();
-};
+    duint mModBase;
+    int mTabSize = 4; //TODO: make customizable?
 
-#endif // SOURCEVIEW_H
+    FileLines* mFileLines = nullptr;
+
+    enum
+    {
+        ColAddr,
+        ColLine,
+        ColCode,
+    };
+
+    struct CodeData
+    {
+        QString code;
+    };
+
+    struct LineData
+    {
+        duint addr;
+        size_t index;
+        CodeData code;
+    };
+
+    dsint mPrepareTableOffset = 0;
+    std::vector<LineData> mLines;
+
+    void setupContextMenu();
+    void loadFile();
+    void parseLine(size_t index, LineData & line);
+    duint addrFromIndex(size_t index);
+};

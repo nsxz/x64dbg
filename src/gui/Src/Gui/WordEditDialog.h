@@ -1,10 +1,12 @@
-#ifndef WORDEDITDIALOG_H
-#define WORDEDITDIALOG_H
+#pragma once
 
+#include <QValidator>
 #include <QDialog>
 #include <QPushButton>
-#include "ValidateExpressionThread.h"
 #include "Imports.h"
+#include "HexValidator.h"
+
+class ValidateExpressionThread;
 
 namespace Ui
 {
@@ -16,7 +18,7 @@ class WordEditDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit WordEditDialog(QWidget* parent = 0);
+    explicit WordEditDialog(QWidget* parent = nullptr);
     ~WordEditDialog();
     void validateExpression(QString expression);
     void setup(QString title, duint defVal, int byteCount);
@@ -32,15 +34,18 @@ private slots:
     void expressionChanged(bool validExpression, bool validPointer, dsint value);
     void on_signedLineEdit_textEdited(const QString & arg1);
     void on_unsignedLineEdit_textEdited(const QString & arg1);
+    void on_hexLineEdit_textEdited(const QString & arg1);
 
 private:
+    QString convertValueToHexString(duint value);
     Ui::WordEditDialog* ui;
     duint mWord;
     ValidateExpressionThread* mValidateThread;
+    HexValidator hexValidate;
 
     int mHexLineEditPos;
     int mSignedEditPos;
     int mUnsignedEditPos;
+    int mAsciiLineEditPos;
+    int byteCount;
 };
-
-#endif // WORDEDITDIALOG_H

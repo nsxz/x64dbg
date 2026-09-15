@@ -1,134 +1,27 @@
 #include "CalculatorDialog.h"
 #include "ui_CalculatorDialog.h"
+#include "ValidateExpressionThread.h"
 
-CalculatorDialog::CalculatorDialog(QWidget* parent) : QDialog(parent), ui(new Ui::CalculatorDialog)
+static duint bswap(duint value)
 {
-    ui->setupUi(this);
-    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
-    setFixedSize(this->size()); //fixed size
-    connect(this, SIGNAL(validAddress(bool)), ui->btnGoto, SLOT(setEnabled(bool)));
-    connect(this, SIGNAL(validAddress(bool)), ui->btnGotoDump, SLOT(setEnabled(bool)));
-    emit validAddress(false);
-    ui->txtBin->setInputMask(QString("bbbb ").repeated(sizeof(duint) * 2));
-    ui->txtExpression->setText("0");
-    ui->txtExpression->selectAll();
-    ui->txtExpression->setFocus();
-    mValidateThread = new ValidateExpressionThread(this);
-    mValidateThread->setOnExpressionChangedCallback(std::bind(&CalculatorDialog::validateExpression, this, std::placeholders::_1));
-
-    connect(mValidateThread, SIGNAL(expressionChanged(bool, bool, dsint)), this, SLOT(expressionChanged(bool, bool, dsint)));
-    connect(ui->txtExpression, SIGNAL(textChanged(QString)), mValidateThread, SLOT(textChanged(QString)));
+    duint result = 0;
+    for(size_t i = 0; i < sizeof(value); i++)
+        ((unsigned char*)&result)[sizeof(value) - i - 1] = ((unsigned char*)&value)[i];
+    return result;
 }
 
-CalculatorDialog::~CalculatorDialog()
+QString CalculatorDialog::inFormat(const duint val, CalculatorDialog::Format format) const
 {
-    delete ui;
-}
-
-void CalculatorDialog::validateExpression(QString expression)
-{
-    duint value;
-    bool validExpression = DbgFunctions()->ValFromString(expression.toUtf8().constData(), &value);
-    bool validPointer = validExpression && DbgMemIsValidReadPtr(value);
-    this->mValidateThread->emitExpressionChanged(validExpression, validPointer, value);
-}
-
-void CalculatorDialog::showEvent(QShowEvent* event)
-{
-    Q_UNUSED(event);
-    mValidateThread->start(ui->txtExpression->text());
-}
-
-void CalculatorDialog::hideEvent(QHideEvent* event)
-{
-    Q_UNUSED(event);
-    mValidateThread->stop();
-    mValidateThread->wait();
-}
-
-void CalculatorDialog::setExpressionFocus()
-{
-    ui->txtExpression->selectAll();
-    ui->txtExpression->setFocus();
-}
-
-void CalculatorDialog::expressionChanged(bool validExpression, bool validPointer, dsint value)
-{
-    if(!validExpression)
-    {
-        ui->txtBin->setText("");
-        ui->txtSignedDec->setText("");
-        ui->txtUnsignedDec->setText("");
-        ui->txtHex->setText("");
-        ui->txtOct->setText("");
-        ui->txtAscii->setText("");
-        ui->txtUnicode->setText("");
-        ui->txtExpression->setStyleSheet("border: 2px solid red");
-        emit validAddress(false);
-    }
-    else
-    {
-        ui->txtExpression->setStyleSheet("");
-        ui->txtHex->setText(inFormat(value, N_HEX));
-        ui->txtSignedDec->setText(inFormat(value, N_SDEC));
-        ui->txtUnsignedDec->setText(inFormat(value, N_UDEC));
-        int cursorpos = ui->txtBin->cursorPosition();
-        ui->txtBin->setText(inFormat(value, N_BIN));
-        ui->txtBin->setCursorPosition(cursorpos);
-        ui->txtOct->setText(inFormat(value, N_OCT));
-        if((value == (value & 0xFF)))
-        {
-            QChar c = QChar::fromLatin1((char)value);
-            if(c.isPrint())
-                ui->txtAscii->setText("'" + QString(c) + "'");
-            else
-                ui->txtAscii->setText("???");
-        }
-        else
-            ui->txtAscii->setText("???");
-        ui->txtAscii->setCursorPosition(1);
-        if((value == (value & 0xFFF)))  //UNICODE?
-        {
-            QChar c = QChar::fromLatin1((wchar_t)value);
-            if(c.isPrint())
-                ui->txtUnicode->setText("L'" + QString(c) + "'");
-            else
-                ui->txtUnicode->setText("????");
-        }
-        else
-        {
-            ui->txtUnicode->setText("????");
-        }
-        ui->txtUnicode->setCursorPosition(2);
-        emit validAddress(validPointer);
-    }
-}
-
-void CalculatorDialog::on_txtExpression_textChanged(const QString & arg1)
-{
-    Q_UNUSED(arg1);
-    ui->txtHex->setStyleSheet("");
-    ui->txtSignedDec->setStyleSheet("");
-    ui->txtUnsignedDec->setStyleSheet("");
-    ui->txtOct->setStyleSheet("");
-    ui->txtBin->setStyleSheet("");
-    ui->txtAscii->setStyleSheet("");
-    ui->txtUnicode->setStyleSheet("");
-    emit validAddress(false);
-}
-
-QString CalculatorDialog::inFormat(const duint val, CalculatorDialog::NUMBERFORMAT NF) const
-{
-    switch(NF)
+    switch(format)
     {
     default:
-    case N_HEX:
+    case Format::Hex:
         return QString("%1").arg(val, 1, 16, QChar('0')).toUpper();
-    case N_SDEC:
+    case Format::SignedDec:
         return QString("%1").arg((dsint)val);
-    case N_UDEC:
+    case Format::UnsignedDec:
         return QString("%1").arg(val);
-    case N_BIN:
+    case Format::Binary:
     {
         QString binary = QString("%1").arg(val, 8 * sizeof(duint), 2, QChar('0')).toUpper();
         QString ans = "";
@@ -140,17 +33,152 @@ QString CalculatorDialog::inFormat(const duint val, CalculatorDialog::NUMBERFORM
         }
         return ans;
     }
-    case N_OCT:
+    case Format::Octal:
         return QString("%1").arg(val, 1, 8, QChar('0')).toUpper();
-    case N_ASCII:
-        return QString("'%1'").arg((char)val);
+    case Format::Bytes:
+        return QString("%1").arg(bswap(val), 2 * sizeof(duint), 16, QChar('0')).toUpper();
     }
 }
 
-void CalculatorDialog::on_btnGoto_clicked()
+CalculatorDialog::CalculatorDialog(QWidget* parent) : QDialog(parent), ui(new Ui::CalculatorDialog)
 {
-    DbgCmdExecDirect(QString("disasm " + ui->txtExpression->text()).toUtf8().constData());
-    emit showCpu();
+    ui->setupUi(this);
+    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
+
+    connect(this, SIGNAL(validAddress(bool)), ui->btnGoto, SLOT(setEnabled(bool)));
+    connect(this, SIGNAL(validAddress(bool)), ui->btnGotoDump, SLOT(setEnabled(bool)));
+    connect(this, SIGNAL(validAddress(bool)), ui->btnGotoMemoryMap, SLOT(setEnabled(bool)));
+    emit validAddress(false);
+
+    ui->txtBytes->setInputMask(QString("HH").repeated(sizeof(duint)));
+    ui->txtBin->setInputMask(QString("bbbb ").repeated(sizeof(duint) * 2).trimmed());
+
+    ui->txtExpression->setText("0");
+    ui->txtExpression->selectAll();
+    ui->txtExpression->setFocus();
+
+    mValidateThread = new ValidateExpressionThread(this);
+    mValidateThread->setOnExpressionChangedCallback(std::bind(&CalculatorDialog::validateExpression, this, std::placeholders::_1));
+
+    connect(mValidateThread, SIGNAL(expressionChanged(bool, bool, dsint)), this, SLOT(expressionChanged(bool, bool, dsint)));
+    connect(ui->txtExpression, SIGNAL(textChanged(QString)), mValidateThread, SLOT(textChanged(QString)));
+}
+
+CalculatorDialog::~CalculatorDialog()
+{
+    mValidateThread->stop();
+    mValidateThread->wait();
+    delete ui;
+}
+
+void CalculatorDialog::validateExpression(QString expression)
+{
+    duint value;
+    bool validExpression = DbgFunctions()->ValFromString(expression.toUtf8().constData(), &value);
+    bool validPointer = validExpression && DbgMemIsValidReadPtr(value);
+    this->mValidateThread->emitExpressionChanged(validExpression, validPointer, value);
+}
+
+void CalculatorDialog::setExpressionFocus()
+{
+    ui->txtExpression->selectAll();
+    ui->txtExpression->setFocus();
+}
+
+void CalculatorDialog::showEvent(QShowEvent* event)
+{
+    Q_UNUSED(event);
+    mValidateThread->start();
+}
+
+void CalculatorDialog::hideEvent(QHideEvent* event)
+{
+    Q_UNUSED(event);
+    mValidateThread->stop();
+    mValidateThread->wait();
+}
+
+void CalculatorDialog::expressionChanged(bool validExpression, bool validPointer, dsint value)
+{
+    if(!validExpression)
+    {
+        ui->txtHex->setText("");
+        ui->txtSignedDec->setText("");
+        ui->txtUnsignedDec->setText("");
+        ui->txtOct->setText("");
+        ui->txtBytes->setText("");
+        ui->txtBin->setText("");
+        ui->txtAscii->setText("");
+        ui->txtUnicode->setText("");
+
+        ui->txtExpression->setStyleSheet("border: 2px solid red");
+        emit validAddress(false);
+    }
+    else
+    {
+        ui->txtExpression->setStyleSheet("");
+        ui->txtHex->setText(inFormat(value, Format::Hex));
+        ui->txtSignedDec->setText(inFormat(value, Format::SignedDec));
+        ui->txtUnsignedDec->setText(inFormat(value, Format::UnsignedDec));
+        ui->txtOct->setText(inFormat(value, Format::Octal));
+
+        {
+            int cursorpos = ui->txtBytes->cursorPosition();
+            ui->txtBytes->setText(inFormat(value, Format::Bytes));
+            ui->txtBytes->setCursorPosition(cursorpos);
+        }
+
+        {
+
+            int cursorpos = ui->txtBin->cursorPosition();
+            ui->txtBin->setText(inFormat(value, Format::Binary));
+            ui->txtBin->setCursorPosition(cursorpos);
+        }
+
+        if(value == (value & 0xFF))
+        {
+            QChar c((ushort)value);
+            if(c.isPrint())
+                ui->txtAscii->setText(QString(c));
+            else
+                ui->txtAscii->setText("???");
+        }
+        else
+            ui->txtAscii->setText("???");
+
+        ui->txtAscii->setCursorPosition(0);
+        ui->txtAscii->selectAll();
+        if(value == (value & 0xFFFF)) //UNICODE?
+        {
+            QChar c = QChar((ushort)value);
+            if(c.isPrint())
+                ui->txtUnicode->setText(QString(c));
+            else
+                ui->txtUnicode->setText("????");
+        }
+        else
+        {
+            ui->txtUnicode->setText("????");
+        }
+        ui->txtUnicode->setCursorPosition(0);
+        ui->txtUnicode->selectAll();
+
+        emit validAddress(validPointer);
+    }
+}
+
+void CalculatorDialog::on_txtExpression_textChanged(const QString & arg1)
+{
+    Q_UNUSED(arg1);
+    ui->txtHex->setStyleSheet("");
+    ui->txtSignedDec->setStyleSheet("");
+    ui->txtUnsignedDec->setStyleSheet("");
+    ui->txtOct->setStyleSheet("");
+    ui->txtBytes->setStyleSheet("");
+    ui->txtBin->setStyleSheet("");
+    ui->txtAscii->setStyleSheet("");
+    ui->txtUnicode->setStyleSheet("");
+    emit validAddress(false);
 }
 
 void CalculatorDialog::on_txtHex_textEdited(const QString & arg1)
@@ -205,11 +233,26 @@ void CalculatorDialog::on_txtOct_textEdited(const QString & arg1)
     ui->txtExpression->setText(QString("%1").arg(val, 1, 16, QChar('0')).toUpper());
 }
 
+void CalculatorDialog::on_txtBytes_textEdited(const QString & arg1)
+{
+    bool ok = false;
+    QString text = arg1;
+    text = text.leftJustified(sizeof(duint) * 2, '0', true);
+    ULONGLONG val = text.toULongLong(&ok, 16);
+    if(!ok)
+    {
+        ui->txtBytes->setStyleSheet("border: 2px solid red");
+        return;
+    }
+    ui->txtBytes->setStyleSheet("");
+    ui->txtExpression->setText(QString("%1").arg(bswap(val), 1, 16, QChar('0')).toUpper());
+}
+
 void CalculatorDialog::on_txtBin_textEdited(const QString & arg1)
 {
     bool ok = false;
     QString text = arg1;
-    text = text.replace(" ", "");
+    text = text.replace(" ", "").leftJustified(sizeof(duint) * 8, '0', true);
     ULONGLONG val = text.toULongLong(&ok, 2);
     if(!ok)
     {
@@ -223,33 +266,33 @@ void CalculatorDialog::on_txtBin_textEdited(const QString & arg1)
 void CalculatorDialog::on_txtAscii_textEdited(const QString & arg1)
 {
     QString text = arg1;
-    text = text.replace("'", "");
-    if(text.length() > 1)
-    {
-        ui->txtAscii->setStyleSheet("border: 2px solid red");
-        return;
-    }
     ui->txtAscii->setStyleSheet("");
-    ui->txtExpression->setText(QString().sprintf("%X", text[0].toLatin1()));
-    ui->txtAscii->setCursorPosition(1);
+    ui->txtExpression->setText(QString().sprintf("%X", text[0].unicode()));
+    ui->txtAscii->setCursorPosition(0);
+    ui->txtAscii->selectAll();
 }
 
 void CalculatorDialog::on_txtUnicode_textEdited(const QString & arg1)
 {
     QString text = arg1;
-    text = text.replace("L'", "").replace("'", "");
-    if(text.length() > 1)
-    {
-        ui->txtUnicode->setStyleSheet("border: 2px solid red");
-        return;
-    }
     ui->txtUnicode->setStyleSheet("");
     ui->txtExpression->setText(QString().sprintf("%X", text[0].unicode()));
-    ui->txtUnicode->setCursorPosition(2);
+    ui->txtUnicode->setCursorPosition(0);
+    ui->txtUnicode->selectAll();
+}
+
+void CalculatorDialog::on_btnGoto_clicked()
+{
+    DbgCmdExecDirect(QString("disasm " + ui->txtHex->text()));
 }
 
 void CalculatorDialog::on_btnGotoDump_clicked()
 {
-    DbgCmdExecDirect(QString("dump " + ui->txtExpression->text()).toUtf8().constData());
-    emit showCpu();
+    DbgCmdExecDirect(QString("dump " + ui->txtHex->text()));
 }
+
+void CalculatorDialog::on_btnGotoMemoryMap_clicked()
+{
+    DbgCmdExecDirect(QString("memmapdump " + ui->txtHex->text()));
+}
+

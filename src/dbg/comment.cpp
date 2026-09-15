@@ -1,4 +1,5 @@
 #include "comment.h"
+#include "database_cb_batcher.h"
 
 struct CommentSerializer : AddrInfoSerializer<COMMENTSINFO>
 {
@@ -22,6 +23,17 @@ struct Comments : AddrInfoHashMap<LockComments, COMMENTSINFO, CommentSerializer>
     {
         return "comments";
     }
+
+protected:
+    bool populateDbOperation(DbOperation & op, const COMMENTSINFO & value) const override
+    {
+        op.itemType = DbItemTypeComment;
+        op.manual = value.manual;
+        op.modhash = value.modhash;
+        op.address = value.addr;
+        op.comment.text = value.text.c_str();
+        return true;
+    }
 };
 
 static Comments comments;
@@ -41,7 +53,7 @@ bool CommentSet(duint Address, const char* Text, bool Manual)
     COMMENTSINFO comment;
     if(!comments.PrepareValue(comment, Address, Manual))
         return false;
-    strcpy_s(comment.text, Text);
+    comment.text = Text;
     return comments.Add(comment);
 }
 
@@ -51,9 +63,9 @@ bool CommentGet(duint Address, char* Text)
     if(!comments.Get(Comments::VaKey(Address), comment))
         return false;
     if(comment.manual)
-        strcpy_s(Text, MAX_COMMENT_SIZE, comment.text);
+        strncpy_s(Text, MAX_COMMENT_SIZE, comment.text.c_str(), _TRUNCATE);
     else
-        sprintf_s(Text, MAX_COMMENT_SIZE, "\1%s", comment.text);
+        _snprintf_s(Text, MAX_COMMENT_SIZE, _TRUNCATE, "\1%s", comment.text.c_str());
     return true;
 }
 
@@ -64,6 +76,7 @@ bool CommentDelete(duint Address)
 
 void CommentDelRange(duint Start, duint End, bool Manual)
 {
+    DbCallbackBatcher batcher;
     comments.DeleteRange(Start, End, Manual);
 }
 
@@ -74,8 +87,9 @@ void CommentCacheSave(JSON Root)
 
 void CommentCacheLoad(JSON Root)
 {
+    DbCallbackBatcher batcher(true);
     comments.CacheLoad(Root);
-    comments.CacheLoad(Root, false, "auto"); //legacy support
+    comments.CacheLoad(Root, "auto"); //legacy support
 }
 
 bool CommentEnum(COMMENTSINFO* List, size_t* Size)
@@ -83,9 +97,10 @@ bool CommentEnum(COMMENTSINFO* List, size_t* Size)
     return comments.Enum(List, Size);
 }
 
-void CommentClear()
+void CommentClear(bool Terminating)
 {
-    comments.Clear();
+    DbCallbackBatcher batcher;
+    comments.Clear(Terminating);
 }
 
 void CommentGetList(std::vector<COMMENTSINFO> & list)

@@ -6,96 +6,24 @@
 
 #include "assemble.h"
 #include "memory.h"
-#include "XEDParse\XEDParse.h"
+#include "XEDParse/XEDParse.h"
 #include "value.h"
 #include "disasm_fast.h"
-#include "debugger.h"
 #include "disasm_helper.h"
-#include "memory.h"
-#include "keystone\keystone.h"
+#include "datainst_helper.h"
+#include "debugger.h"
 
 AssemblerEngine assemblerEngine = AssemblerEngine::XEDParse;
 
-namespace Keystone
+namespace asmjit
 {
-    static char* stristr(const char* haystack, const char* needle)
-    {
-        // Case insensitive strstr
-        // http://stackoverflow.com/questions/27303062/strstr-function-like-that-ignores-upper-or-lower-case
-        do
-        {
-            const char* h = haystack;
-            const char* n = needle;
-            while(tolower((unsigned char)*h) == tolower((unsigned char)*n) && *n)
-            {
-                h++;
-                n++;
-            }
-
-            if(*n == 0)
-                return (char*)haystack;
-
-        }
-        while(*haystack++);
-
-        // Not found
-        return nullptr;
-    }
-
-    static bool StrDel(char* Source, char* Needle, char StopAt = '\0')
-    {
-        // Find the location in the string first
-        char* loc = stristr(Source, Needle);
-
-        if(!loc)
-            return false;
-
-        // "Delete" the word by shifting it over
-        auto needleLen = strlen(Needle);
-
-        memcpy(loc, loc + needleLen, strlen(loc) - needleLen + 1);
-
-        return true;
-    }
-
     static XEDPARSE_STATUS XEDParseAssemble(XEDPARSE* XEDParse)
     {
-        if(!XEDParse)
-            return XEDPARSE_ERROR;
-
-        auto sep = strstr(XEDParse->instr, ";");
-        if(!sep)
-            sep = strstr(XEDParse->instr, "\n");
-        if(sep)
-            *sep = '\0';
-        StrDel(XEDParse->instr, "short ");
-
-        ks_engine* ks;
-        ks_err err = ks_open(KS_ARCH_X86, XEDParse->x64 ? KS_MODE_64 : KS_MODE_32, &ks);
-        if(err != KS_ERR_OK)
-        {
-            strcpy_s(XEDParse->error, "Failed on ks_open()...");
-            return XEDPARSE_ERROR;
-        }
-        //ks_option(ks, KS_OPT_SYNTAX, KS_OPT_SYNTAX_INTEL);
-        auto result = XEDPARSE_OK;
-        unsigned char* encode;
-        size_t size;
-        size_t count;
-        if(ks_asm(ks, XEDParse->instr, XEDParse->cip, &encode, &size, &count) != KS_ERR_OK)
-        {
-            sprintf_s(XEDParse->error, "ks_asm() failed: count = %lu, error = %u", count, ks_errno(ks));
-            result = XEDPARSE_ERROR;
-        }
-        else
-        {
-            XEDParse->dest_size = (unsigned int)min(size, XEDPARSE_MAXASMSIZE);
-            for(size_t i = 0; i < XEDParse->dest_size; i++)
-                XEDParse->dest[i] = encode[i];
-        }
-        ks_free(encode);
-        ks_close(ks);
-        return result;
+        static auto asmjitAssemble = (XEDPARSE_STATUS(*)(XEDPARSE*))GetProcAddress(LoadLibraryW(L"asmjit.dll"), "XEDParseAssemble");
+        if(asmjitAssemble)
+            return asmjitAssemble(XEDParse);
+        strcpy_s(XEDParse->error, "asmjit not found!");
+        return XEDPARSE_ERROR;
     }
 }
 
@@ -110,8 +38,12 @@ static bool cbUnknown(const char* text, ULONGLONG* value)
     return true;
 }
 
-bool assemble(duint addr, unsigned char* dest, int* size, const char* instruction, char* error)
+bool assemble(duint addr, unsigned char* dest, int destsize, int* size, const char* instruction, char* error)
 {
+    if(isdatainstruction(instruction))
+    {
+        return tryassembledata(addr, dest, destsize, size, instruction, error);
+    }
     if(strlen(instruction) >= XEDPARSE_MAXBUFSIZE)
         return false;
     XEDPARSE parse;
@@ -125,8 +57,8 @@ bool assemble(duint addr, unsigned char* dest, int* size, const char* instructio
     parse.cip = addr;
     strcpy_s(parse.instr, instruction);
     auto DoAssemble = XEDParseAssemble;
-    if(assemblerEngine == AssemblerEngine::Keystone)
-        DoAssemble = Keystone::XEDParseAssemble;
+    if(assemblerEngine == AssemblerEngine::asmjit || assemblerEngine == AssemblerEngine::Keystone)
+        DoAssemble = asmjit::XEDParseAssemble;
     if(DoAssemble(&parse) == XEDPARSE_ERROR)
     {
         if(error)
@@ -140,6 +72,11 @@ bool assemble(duint addr, unsigned char* dest, int* size, const char* instructio
         *size = parse.dest_size;
 
     return true;
+}
+
+bool assemble(duint addr, unsigned char* dest, int* size, const char* instruction, char* error)
+{
+    return assemble(addr, dest, 16, size, instruction, error);
 }
 
 static bool isInstructionPointingToExMemory(duint addr, const unsigned char* dest)
@@ -157,32 +94,27 @@ static bool isInstructionPointingToExMemory(duint addr, const unsigned char* des
     if(MemIsCodePage(basicinfo.addr, false))
         return true;
 
-#ifndef _WIN64
-    DWORD lpFlagsDep;
-    BOOL bPermanentDep;
-
-    // DEP is disabled if lpFlagsDep == 0
-    typedef BOOL(WINAPI * GETPROCESSDEPPOLICY)(
-        _In_  HANDLE  hProcess,
-        _Out_ LPDWORD lpFlags,
-        _Out_ PBOOL   lpPermanent
-    );
-    static auto GPDP = GETPROCESSDEPPOLICY(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetProcessDEPPolicy"));
-
-    // If DEP is disabled it doesn't matter where the memory points because it's executable anyway.
-    if(GPDP && GPDP(fdProcessInfo->hProcess, &lpFlagsDep, &bPermanentDep) && lpFlagsDep == 0)
-        return true;
-#endif //_WIN64
-
-    return false;
+    // Check if DEP is disabled
+    return !dbgisdepenabled();
 }
 
 bool assembleat(duint addr, const char* instruction, int* size, char* error, bool fillnop)
 {
-    int destSize;
-    unsigned char dest[16];
-    if(!assemble(addr, dest, &destSize, instruction, error))
-        return false;
+    int destSize = 0;
+    Memory<unsigned char*> dest(16 * sizeof(unsigned char), "AssembleBuffer");
+    unsigned char* newbuffer = nullptr;
+    if(!assemble(addr, dest(), 16, &destSize, instruction, error))
+    {
+        if(destSize > 16)
+        {
+            dest.realloc(destSize);
+            if(!assemble(addr, dest(), destSize, &destSize, instruction, error))
+                return false;
+        }
+        else
+            return false;
+    }
+
     //calculate the number of NOPs to insert
     int origLen = disasmgetsize(addr);
     while(origLen < destSize)
@@ -195,10 +127,16 @@ bool assembleat(duint addr, const char* instruction, int* size, char* error, boo
         *size = destSize;
 
     // Check if the instruction doesn't set IP to non-executable memory
-    if(!isInstructionPointingToExMemory(addr, dest))
-        GuiDisplayWarning("Non-executable memory region", "Assembled branch does not point to an executable memory region!");
+    if(!isInstructionPointingToExMemory(addr, dest()))
+    {
+        String Title;
+        String Text;
+        Title = GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Non-executable memory region"));
+        Text = GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Assembled branch does not point to an executable memory region!"));
+        GuiDisplayWarning(Title.c_str(), Text.c_str());
+    }
 
-    bool ret = MemPatch(addr, dest, destSize);
+    bool ret = MemPatch(addr, dest(), destSize);
 
     if(ret)
     {
@@ -217,7 +155,7 @@ bool assembleat(duint addr, const char* instruction, int* size, char* error, boo
     else
     {
         // Tell the user writing is blocked
-        strcpy_s(error, MAX_ERROR_SIZE, "Error while writing process memory");
+        strcpy_s(error, MAX_ERROR_SIZE, GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Error while writing process memory")));
     }
 
     return ret;

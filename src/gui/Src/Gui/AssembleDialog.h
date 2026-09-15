@@ -1,10 +1,10 @@
-#ifndef ASSEMBLEDIALOG_H
-#define ASSEMBLEDIALOG_H
+#pragma once
 
 #include <QDialog>
 #include <functional>
 #include "Bridge.h"
-#include "ValidateExpressionThread.h"
+
+class ValidateExpressionThread;
 
 namespace Ui
 {
@@ -16,7 +16,7 @@ class AssembleDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit AssembleDialog(QWidget* parent = 0);
+    explicit AssembleDialog(QWidget* parent = nullptr);
     ~AssembleDialog();
     QString editText;
     static bool bWarningShowedOnce;
@@ -33,21 +33,18 @@ public:
     void setOkButtonEnabled(bool enabled);
 
     void validateInstruction(QString expression);
-    void hideEvent(QHideEvent* event);
 
 private slots:
     void textChangedSlot(QString text);
-    void instructionChangedSlot(dsint sizeDifference, QString error);
+    void instructionChangedSlot(dsint sizeDifference, QString data);
     void on_lineEdit_textChanged(const QString & arg1);
     void on_checkBoxKeepSize_clicked(bool checked);
     void on_checkBoxFillWithNops_clicked(bool checked);
     void on_radioXEDParse_clicked();
-    void on_radioKeystone_clicked();
+    void on_radioAsmjit_clicked();
 
 private:
     Ui::AssembleDialog* ui;
     duint mSelectedInstrVa;
     ValidateExpressionThread* mValidateThread;
 };
-
-#endif // ASSEMBLEDIALOG_H

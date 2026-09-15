@@ -1,5 +1,5 @@
-#include "selectfields.h"
-#include "ui_selectfields.h"
+#include "SelectFields.h"
+#include "ui_SelectFields.h"
 
 SelectFields::SelectFields(QWidget* parent) :
     QDialog(parent),
@@ -10,7 +10,7 @@ SelectFields::SelectFields(QWidget* parent) :
     setModal(true);
 }
 
-QListWidget* SelectFields::GetList(void)
+QListWidget* SelectFields::GetList()
 {
     return ui->listWidget;
 }

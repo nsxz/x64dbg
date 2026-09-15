@@ -23,27 +23,19 @@ struct VAR_VALUE
 {
     union
     {
-        duint value;
+        duint value = 0;
         std::vector<unsigned char>* data;
     } u;
-    VAR_VALUE_TYPE type;
-    int size;
+    VAR_VALUE_TYPE type = VAR_UINT;
+    int size = 0;
 };
 
 struct VAR
 {
     String name;
     String alias;
-    VAR_TYPE type;
+    VAR_TYPE type = VAR_SYSTEM;
     VAR_VALUE value;
-};
-
-struct CaseInsensitiveCompare
-{
-    bool operator()(const String & str1, const String & str2) const
-    {
-        return _stricmp(str1.c_str(), str2.c_str()) < 0;
-    }
 };
 
 //functions
@@ -57,8 +49,8 @@ bool varget(const char* Name, duint* Value, int* Size, VAR_TYPE* Type);
 bool varget(const char* Name, char* String, int* Size, VAR_TYPE* Type);
 bool varset(const char* Name, duint Value, bool ReadOnly);
 bool varset(const char* Name, const char* Value, bool ReadOnly);
-bool vardel(const char* Name, bool DelSystem);
+int vardel(const char* Name, bool DelSystem);
 bool vargettype(const char* Name, VAR_TYPE* Type = nullptr, VAR_VALUE_TYPE* ValueType = nullptr);
-bool varenum(VAR* List, size_t* Size);
+std::vector<VAR> varenum();
 
 #endif // _VARIABLE_H

@@ -1,5 +1,4 @@
-#ifndef PATCHDIALOG_H
-#define PATCHDIALOG_H
+#pragma once
 
 #include <QDialog>
 #include <QListWidgetItem>
@@ -43,7 +42,7 @@ class PatchDialog : public QDialog
     }
 
 public:
-    explicit PatchDialog(QWidget* parent = 0);
+    explicit PatchDialog(QWidget* parent = nullptr);
     ~PatchDialog();
 
 private:
@@ -60,6 +59,10 @@ private:
 
     void saveAs1337(const QString & filename);
     //void saveAsC(const QString & filename);
+
+    bool containsRelocatedBytes();
+    bool containsRelocatedBytes(const PatchInfoList & patchList);
+    bool showRelocatedBytesWarning();
 
 private slots:
     void dbgStateChanged(DBGSTATE state);
@@ -78,5 +81,3 @@ private slots:
     void on_btnImport_clicked();
     void on_btnExport_clicked();
 };
-
-#endif // PATCHDIALOG_H

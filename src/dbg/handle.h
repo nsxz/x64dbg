@@ -6,9 +6,12 @@
 class Handle
 {
 public:
-    Handle(HANDLE h = nullptr)
+    Handle(HANDLE h = nullptr) : mHandle(h) { }
+    Handle(const Handle &) = delete;
+    Handle(Handle && o)
     {
-        mHandle = h;
+        mHandle = o.mHandle;
+        o.mHandle = nullptr;
     }
 
     ~Handle()
@@ -18,30 +21,23 @@ public:
 
     void Close()
     {
-        DWORD dwFlags = 0;
-        if(GetHandleInformation(mHandle, &dwFlags) && !(dwFlags & HANDLE_FLAG_PROTECT_FROM_CLOSE))
-            CloseHandle(mHandle);
-        mHandle = INVALID_HANDLE_VALUE;
+        if(*this)
+        {
+            DWORD dwFlags = 0;
+            if(GetHandleInformation(mHandle, &dwFlags) && !(dwFlags & HANDLE_FLAG_PROTECT_FROM_CLOSE))
+                CloseHandle(mHandle);
+            mHandle = INVALID_HANDLE_VALUE;
+        }
     }
 
-    const HANDLE & operator=(const HANDLE & h)
-    {
-        return mHandle = h;
-    }
-
-    operator HANDLE & ()
+    operator HANDLE()
     {
         return mHandle;
     }
 
-    bool operator!() const
+    explicit operator bool() const
     {
-        return (!mHandle || mHandle == INVALID_HANDLE_VALUE);
-    }
-
-    operator bool() const
-    {
-        return !this;
+        return mHandle != nullptr && mHandle != INVALID_HANDLE_VALUE;
     }
 
 private:

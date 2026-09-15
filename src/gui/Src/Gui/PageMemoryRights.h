@@ -1,5 +1,4 @@
-#ifndef PAGEMEMORYRIGHTS_H
-#define PAGEMEMORYRIGHTS_H
+#pragma once
 
 #include <QDialog>
 #include "dbg_types.h"
@@ -14,7 +13,7 @@ class PageMemoryRights : public QDialog
     Q_OBJECT
 
 public:
-    explicit PageMemoryRights(QWidget* parent = 0);
+    explicit PageMemoryRights(QWidget* parent = nullptr);
     void RunAddrSize(duint, duint, QString);
     ~PageMemoryRights();
 
@@ -32,5 +31,3 @@ private:
     duint size;
     QString pagetype;
 };
-
-#endif // PAGEMEMORYRIGHTS_H

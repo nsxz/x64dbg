@@ -2,34 +2,33 @@
 #define _MSGQUEUE_H
 
 #include "_global.h"
-#include <windows.h>
-#include <agents.h>
+#include "concurrentqueue/blockingconcurrentqueue.h"
 
 #define MAX_MESSAGES 256
 
 // Message structure
 struct MESSAGE
 {
-    int msg;
-    duint param1;
-    duint param2;
+    int msg = -1;
+    duint param1 = 0;
+    duint param2 = 0;
 };
 
 // Message stack structure
-class MESSAGE_STACK
+class MESSAGE_QUEUE
 {
 public:
-    Concurrency::unbounded_buffer<MESSAGE> msgs;
+    moodycamel::BlockingConcurrentQueue<MESSAGE> msgs;
 
-    int WaitingCalls;   // Number of threads waiting
-    bool Destroy;       // Destroy stack as soon as possible
+    int WaitingCalls = 0; // Number of threads waiting
+    bool Destroy = false; // Destroy stack as soon as possible
 };
 
 // Function definitions
-MESSAGE_STACK* MsgAllocStack();
-void MsgFreeStack(MESSAGE_STACK* Stack);
-bool MsgSend(MESSAGE_STACK* Stack, int Msg, duint Param1, duint Param2);
-bool MsgGet(MESSAGE_STACK* Stack, MESSAGE* Msg);
-void MsgWait(MESSAGE_STACK* Stack, MESSAGE* Msg);
+MESSAGE_QUEUE* MsgAllocQueue();
+void MsgFreeQueue(MESSAGE_QUEUE* Stack);
+bool MsgSend(MESSAGE_QUEUE* Stack, int Msg, duint Param1, duint Param2);
+bool MsgGet(MESSAGE_QUEUE* Stack, MESSAGE* Msg);
+void MsgWait(MESSAGE_QUEUE* Stack, MESSAGE* Msg);
 
 #endif // _MSGQUEUE_H

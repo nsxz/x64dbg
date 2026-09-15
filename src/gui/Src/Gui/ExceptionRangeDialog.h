@@ -1,5 +1,4 @@
-#ifndef EXCEPTIONRANGEDIALOG_H
-#define EXCEPTIONRANGEDIALOG_H
+#pragma once
 
 #include <QDialog>
 
@@ -13,7 +12,7 @@ class ExceptionRangeDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit ExceptionRangeDialog(QWidget* parent = 0);
+    explicit ExceptionRangeDialog(QWidget* parent = nullptr);
     ~ExceptionRangeDialog();
 
     unsigned long rangeStart;
@@ -27,5 +26,3 @@ private slots:
 private:
     Ui::ExceptionRangeDialog* ui;
 };
-
-#endif // EXCEPTIONRANGEDIALOG_H

@@ -6,7 +6,7 @@
 
 struct COMMENTSINFO : AddrInfo
 {
-    char text[MAX_COMMENT_SIZE];
+    std::string text;
 };
 
 bool CommentSet(duint Address, const char* Text, bool Manual);
@@ -16,7 +16,7 @@ void CommentDelRange(duint Start, duint End, bool Manual);
 void CommentCacheSave(JSON Root);
 void CommentCacheLoad(JSON Root);
 bool CommentEnum(COMMENTSINFO* List, size_t* Size);
-void CommentClear();
+void CommentClear(bool Terminating);
 void CommentGetList(std::vector<COMMENTSINFO> & list);
 bool CommentGetInfo(duint Address, COMMENTSINFO* info);
 

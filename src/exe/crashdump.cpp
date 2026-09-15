@@ -1,8 +1,13 @@
 #include <windows.h>
+#pragma warning(push)
+#pragma warning(disable:4091)
 #include <dbghelp.h>
+#pragma warning(pop)
 #include <stdio.h>
 #include <exception>
+#include <signal.h>
 #include "crashdump.h"
+#include "signaturecheck.h"
 
 #define PROCESS_CALLBACK_FILTER_ENABLED 0x1
 
@@ -32,23 +37,26 @@ BOOL
 
 void CrashDumpInitialize()
 {
+    // The error mode is inherited from the parent process. Shells like cygwin
+    // (git bash) and node.js set SEM_NOGPFAULTERRORBOX, which makes unhandled
+    // exceptions terminate the process silently, without WER involvement (no
+    // crash dump, no JIT debugger). Reset it so crashes are always reported.
+    // SEM_FAILCRITICALERRORS is kept to avoid legacy hard error popups.
+    SetErrorMode(SEM_FAILCRITICALERRORS);
+
     // Get handles to kernel32 and dbghelp
-    HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
-    HMODULE hDbghelp = LoadLibrary("dbghelp.dll");
+    HMODULE hDbghelp = LoadLibraryCheckedW(L"dbghelp.dll", false);
 
     if(hDbghelp)
         *(FARPROC*)&MiniDumpWriteDumpPtr = GetProcAddress(hDbghelp, "MiniDumpWriteDump");
 
-    if(hKernel32)
-    {
-        *(FARPROC*)&SetProcessUserModeExceptionPolicyPtr = GetProcAddress(hKernel32, "SetProcessUserModeExceptionPolicy");
-        *(FARPROC*)&GetProcessUserModeExceptionPolicyPtr = GetProcAddress(hKernel32, "GetProcessUserModeExceptionPolicy");
-    }
+    HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
+    *(FARPROC*)&SetProcessUserModeExceptionPolicyPtr = GetProcAddress(hKernel32, "SetProcessUserModeExceptionPolicy");
+    *(FARPROC*)&GetProcessUserModeExceptionPolicyPtr = GetProcAddress(hKernel32, "GetProcessUserModeExceptionPolicy");
 
     if(MiniDumpWriteDumpPtr)
         SetUnhandledExceptionFilter(CrashDumpExceptionHandler);
 
-    // --- WINDOWS OVERRIDES ---
     // Ensure that exceptions are not swallowed when dispatching certain Windows
     // messages.
     //
@@ -62,14 +70,15 @@ void CrashDumpInitialize()
             SetProcessUserModeExceptionPolicyPtr(flags & ~PROCESS_CALLBACK_FILTER_ENABLED);
     }
 
-    // --- CRT OVERRIDES ---
-    // If building for release mode, redirect the terminate() and
-    // invalid_parameter() callbacks to force generate a crashdump.
-    //
-#ifndef _DEBUG
-    _set_invalid_parameter_handler(InvalidParameterHandler);
-    set_terminate(TerminateHandler);
-#endif // ndef _DEBUG
+    // If not running under a debugger, redirect purecall, terminate, abort, and
+    // invalid parameter callbacks to force generate a dump.
+    if(!IsDebuggerPresent())
+    {
+        _set_purecall_handler(TerminateHandler);                // https://msdn.microsoft.com/en-us/library/t296ys27.aspx
+        _set_invalid_parameter_handler(InvalidParameterHandler);// https://msdn.microsoft.com/en-us/library/a9yf33zb.aspx
+        std::set_terminate(TerminateHandler);                   // http://en.cppreference.com/w/cpp/error/set_terminate
+        signal(SIGABRT, AbortHandler);                          // https://msdn.microsoft.com/en-us/library/xdkz3x12.aspx
+    }
 }
 
 void CrashDumpFatal(const char* Format, ...)
@@ -81,22 +90,21 @@ void CrashDumpFatal(const char* Format, ...)
     vsnprintf_s(buffer, _TRUNCATE, Format, va);
     va_end(va);
 
-    MessageBox(nullptr, buffer, "Error", MB_ICONERROR);
+    MessageBoxA(nullptr, buffer, "Error", MB_ICONERROR);
 }
 
 void CrashDumpCreate(EXCEPTION_POINTERS* ExceptionPointers)
 {
-    // Generate a crash dump file in the root directory
+    // Generate a crash dump file in the minidump directory
     wchar_t dumpFile[MAX_PATH];
     wchar_t dumpDir[MAX_PATH];
 
     if(!GetCurrentDirectoryW(ARRAYSIZE(dumpDir), dumpDir))
     {
-        CrashDumpFatal("Unable to obtain current directory during crash dump\n");
+        CrashDumpFatal("Unable to obtain current directory during crash dump");
         return;
     }
 
-    // Create minidump subdirectory if needed
     wcscat_s(dumpDir, L"\\minidump");
     CreateDirectoryW(dumpDir, nullptr);
 
@@ -118,7 +126,7 @@ void CrashDumpCreate(EXCEPTION_POINTERS* ExceptionPointers)
 
     if(fileHandle == INVALID_HANDLE_VALUE)
     {
-        CrashDumpFatal("Failed to open file path '%ws' while generating crash dump\n", dumpFile);
+        CrashDumpFatal("Failed to open file path '%ws' while generating crash dump", dumpFile);
         return;
     }
 
@@ -131,7 +139,7 @@ void CrashDumpCreate(EXCEPTION_POINTERS* ExceptionPointers)
     info.ClientPointers = TRUE;
 
     if(!MiniDumpWriteDumpPtr(GetCurrentProcess(), GetCurrentProcessId(), fileHandle, MiniDumpNormal, &info, nullptr, nullptr))
-        CrashDumpFatal("MiniDumpWriteDump failed. Error: %u\n", GetLastError());
+        CrashDumpFatal("MiniDumpWriteDump failed. Error: %u", GetLastError());
 
     // Close the file & done
     CloseHandle(fileHandle);
@@ -139,8 +147,8 @@ void CrashDumpCreate(EXCEPTION_POINTERS* ExceptionPointers)
 
 LONG CALLBACK CrashDumpExceptionHandler(EXCEPTION_POINTERS* ExceptionInfo)
 {
-    // Any "exception" under 0x1000 is usually just a failed RPC call
-    if(ExceptionInfo && ExceptionInfo->ExceptionRecord->ExceptionCode > 0x00001000)
+    // Any "exception" under 0x1000 is usually a failed remote procedure call (RPC)
+    if(ExceptionInfo && ExceptionInfo->ExceptionRecord->ExceptionCode > 0x1000)
     {
         switch(ExceptionInfo->ExceptionRecord->ExceptionCode)
         {
@@ -159,21 +167,24 @@ LONG CALLBACK CrashDumpExceptionHandler(EXCEPTION_POINTERS* ExceptionInfo)
 
 void InvalidParameterHandler(const wchar_t* Expression, const wchar_t* Function, const wchar_t* File, unsigned int Line, uintptr_t Reserved)
 {
-    // Notify user
-    CrashDumpFatal("Invalid parameter passed to CRT function! Program will now crash.\n\nFile: %ws\nFunction: %ws\nExpression: %ws",
+    CrashDumpFatal("Invalid parameter passed to CRT function! Program will now generate an exception.\n\nFile: %ws\nFunction: %ws\nExpression: %ws",
                    Function ? Function : L"???",
                    File ? File : L"???",
                    Expression ? Expression : L"???");
 
-    // Generate exception
-    throw;
+    // RaiseException: avoid the use of throw/C++ exceptions and possible __fastfail calls
+    RaiseException(0x78646267, EXCEPTION_NONCONTINUABLE, 0, nullptr);
 }
 
 void TerminateHandler()
 {
-    // Notify user
-    CrashDumpFatal("Process termination was requested in an unusual way. Program will now crash.");
+    CrashDumpFatal("Process termination was requested in an unusual way. Program will now generate an exception.");
 
-    // Generate exception
-    throw;
+    // See InvalidParameterHandler()
+    RaiseException(0x78646267, EXCEPTION_NONCONTINUABLE, 0, nullptr);
+}
+
+void AbortHandler(int Signal)
+{
+    TerminateHandler();
 }

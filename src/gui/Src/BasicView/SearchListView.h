@@ -1,51 +1,52 @@
-#ifndef SEARCHLISTVIEW_H
-#define SEARCHLISTVIEW_H
+#pragma once
 
 #include <QWidget>
 #include <QLineEdit>
 #include <QCheckBox>
-#include "SearchListViewTable.h"
+#include "MenuBuilder.h"
+#include "ActionHelpers.h"
+#include "AbstractSearchList.h"
 
-namespace Ui
-{
-    class SearchListView;
-}
-
-class SearchListView : public QWidget
+class SearchListView : public QWidget, public ActionHelper<SearchListView>
 {
     Q_OBJECT
 
 public:
-    explicit SearchListView(bool EnableRegex = true, QWidget* parent = 0);
-    ~SearchListView();
+    SearchListView(QWidget* parent, AbstractSearchList* abstractSearchList, bool enableRegex, bool enableLock);
 
-    SearchListViewTable* mList;
-    SearchListViewTable* mSearchList;
-    SearchListViewTable* mCurList;
-    QLineEdit* mSearchBox;
-    int mSearchStartCol;
+    AbstractStdTable* mCurList = nullptr;
+    duint mSearchStartCol = 0;
 
-    bool findTextInList(SearchListViewTable* list, QString text, int row, int startcol, bool startswith);
     void refreshSearchList();
+    void clearFilter();
+    bool isSearchBoxLocked();
+
+    // TODO: allow dynamically enable/disable regex/lock
 
 private slots:
-    void searchTextChanged(const QString & arg1);
+    void filterEntries();
+    void searchTextEdited(const QString & text);
     void listContextMenu(const QPoint & pos);
     void doubleClickedSlot();
     void searchSlot();
-    void on_checkBoxRegex_toggled(bool checked);
+    void on_checkBoxRegex_stateChanged(int state);
 
 signals:
     void enterPressedSignal();
-    void listContextMenuSignal(QMenu* wMenu);
+    void listContextMenuSignal(QMenu* menu);
     void emptySearchResult();
+    void selectionChanged(duint row);
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event);
 
 private:
+    QLineEdit* mSearchBox;
     QCheckBox* mRegexCheckbox;
+    QCheckBox* mLockCheckbox;
     QAction* mSearchAction;
-};
+    QTimer* mTypingTimer;
+    QString mFilterText;
 
-#endif // SEARCHLISTVIEW_H
+    AbstractSearchList* mAbstractSearchList;
+};

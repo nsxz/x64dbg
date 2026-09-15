@@ -1,5 +1,4 @@
-#ifndef STRINGUTIL_H
-#define STRINGUTIL_H
+#pragma once
 
 #include <sstream>
 #include <iomanip>
@@ -8,7 +7,7 @@
 #include <QLocale>
 #include "Imports.h"
 
-static QString ToPtrString(duint Address)
+inline QString ToPtrString(duint Address)
 {
     //
     // This function exists because of how QT handles
@@ -17,103 +16,137 @@ static QString ToPtrString(duint Address)
     // QString::arg():
     // ((int32)0xFFFF0000) == 0xFFFFFFFFFFFF0000 with sign extension
     //
+
     char temp[32];
-
 #ifdef _WIN64
-    sprintf_s(temp, "%016llX", Address);
+    auto size = sprintf_s(temp, "%016llX", Address);
 #else
-    sprintf_s(temp, "%08X", Address);
+    auto size = sprintf_s(temp, "%08X", Address);
 #endif // _WIN64
+    return QString::fromLatin1(temp, size);
+}
 
+inline QString ToLongLongHexString(unsigned long long Value)
+{
+    char temp[32];
+    sprintf_s(temp, "%llX", Value);
     return QString(temp);
 }
 
-static QString ToHexString(duint Value)
+inline QString ToHexString(duint Value)
 {
     char temp[32];
-
 #ifdef _WIN64
     sprintf_s(temp, "%llX", Value);
 #else
     sprintf_s(temp, "%X", Value);
 #endif // _WIN64
-
     return QString(temp);
 }
 
-static QString ToDecString(dsint Value)
+inline QString ToDecString(dsint Value)
 {
     char temp[32];
-
 #ifdef _WIN64
     sprintf_s(temp, "%lld", Value);
 #else
     sprintf_s(temp, "%d", Value);
 #endif // _WIN64
+    return QString(temp);
+}
 
+inline QString ToByteString(unsigned char Value)
+{
+    char temp[4];
+    sprintf_s(temp, "%02X", Value);
+    return QString(temp);
+}
+
+inline QString ToWordString(unsigned short Value)
+{
+    char temp[8];
+    sprintf_s(temp, "%04X", Value);
+    return QString(temp);
+}
+
+inline QString ToDwordString(unsigned int Value)
+{
+    char temp[16];
+    sprintf_s(temp, "%08X", Value);
     return QString(temp);
 }
 
 template<typename T>
-static QString ToFloatingString(void* buffer)
+inline QString ToFloatingString(const void* buffer, int precision)
 {
-    auto value = *(T*)buffer;
-    std::stringstream wFloatingStr;
-    wFloatingStr << std::setprecision(std::numeric_limits<T>::digits10) << value;
-    return QString::fromStdString(wFloatingStr.str());
+    auto value = *(const T*)buffer;
+    std::stringstream floatingStr;
+    floatingStr << std::setprecision(precision) << value;
+    return QString::fromStdString(floatingStr.str());
 }
 
-static QString ToFloatString(void* buffer)
+template<typename T>
+inline QString ToIntegralString(const void* buffer)
 {
-    return ToFloatingString<float>(buffer);
+    auto value = *(const T*)buffer;
+    return ToLongLongHexString(value);
 }
 
-static QString ToDoubleString(void* buffer)
+inline QString ToFloatString(const void* buffer, int precision = std::numeric_limits<float>::digits10)
 {
-    return ToFloatingString<double>(buffer);
+    return ToFloatingString<float>(buffer, precision);
 }
 
-QString ToLongDoubleString(void* buffer);
+inline QString ToDoubleString(const void* buffer, int precision = std::numeric_limits<double>::digits10)
+{
+    return ToFloatingString<double>(buffer, precision);
+}
+
+QString ToLongDoubleString(const void* buffer);
+
+// yyyyMMdd-HHmmss (useful for file suffix)
+QString isoDateTime();
 
 QString ToDateString(const QDate & date);
 
-static QDate GetCompileDate()
+QString fillValue(const char* value, int valsize = 2, bool bFpuRegistersLittleEndian = false);
+QString composeRegTextXMM(const char* value, int mode);
+QString composeRegTextYMM(const char* value, int mode);
+QString composeRegTextZMM(const char* value, int mode);
+
+QString GetDataTypeString(const void* buffer, duint size, ENCODETYPE type);
+
+inline QDate GetCompileDate()
 {
     return QLocale("en_US").toDate(QString(__DATE__).simplified(), "MMM d yyyy");
 }
 
-template<typename T>
-static T & ArchValue(T & x32value, T & x64value)
-{
 #ifdef _WIN64
-    Q_UNUSED(x32value);
-    return x64value;
+#define ArchValue(x32value, x64value) x64value
 #else
-    Q_UNUSED(x64value);
-    return x32value;
+#define ArchValue(x32value, x64value) x32value
 #endif //_WIN64
-}
 
-static bool GetCommentFormat(duint addr, QString & comment, bool* autoComment = nullptr)
+// Format : d:hh:mm:ss.1234567
+inline QString FILETIMEToTime(const FILETIME & time)
 {
-    comment.clear();
-    char commentData[MAX_COMMENT_SIZE] = "";
-    if(!DbgGetCommentAt(addr, commentData))
-        return false;
-    auto a = *commentData == '\1';
-    if(autoComment)
-        *autoComment = a;
-    if(!strstr(commentData, "{"))
-    {
-        comment = commentData + a;
-        return true;
-    }
-    char commentFormat[MAX_SETTING_SIZE] = "";
-    if(DbgFunctions()->StringFormatInline(commentData + a, MAX_SETTING_SIZE, commentFormat))
-        comment = commentFormat;
+    // FILETIME is in 100ns
+    quint64 time100ns = (quint64)time.dwHighDateTime << 32 | (quint64)time.dwLowDateTime;
+    quint64 milliseconds = time100ns / 10000;
+    quint64 days = milliseconds / (1000 * 60 * 60 * 24);
+    QTime qtime = QTime::fromMSecsSinceStartOfDay(milliseconds % (1000 * 60 * 60 * 24));
+    if(days == 0) // 0 days
+        return QString().sprintf("%02d:%02d:%02d.%07lld", qtime.hour(), qtime.minute(), qtime.second(), time100ns % 10000000);
     else
-        comment = commentData + a;
-    return true;
+        return QString().sprintf("%lld:%02d:%02d:%02d.%07lld", days, qtime.hour(), qtime.minute(), qtime.second(), time100ns % 10000000);
 }
 
-#endif // STRINGUTIL_H
+QString FILETIMEToDate(const FILETIME & date);
+
+bool GetCommentFormat(duint addr, QString & comment, bool* autoComment = nullptr);
+
+QString EscapeCh(QChar ch);
+
+QString DbgCmdEscape(QString argument);
+
+QString StringFormatInline(const QString & format);

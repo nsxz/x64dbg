@@ -1,21 +1,6 @@
 #include "jit.h"
 
-bool IsProcessElevated()
-{
-    SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
-    PSID SecurityIdentifier;
-    if(!AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &SecurityIdentifier))
-        return 0;
-
-    BOOL IsAdminMember;
-    if(!CheckTokenMembership(NULL, SecurityIdentifier, &IsAdminMember))
-        IsAdminMember = FALSE;
-
-    FreeSid(SecurityIdentifier);
-    return !!IsAdminMember;
-}
-
-static bool readwritejitkey(wchar_t* jit_key_value, DWORD* jit_key_vale_size, char* key, arch arch_in, arch* arch_out, readwritejitkey_error_t* error, bool write)
+static bool readwritejitkey(const wchar_t* jit_key_value, DWORD* jit_key_vale_size, const char* key, arch arch_in, arch* arch_out, readwritejitkey_error_t* error, bool write)
 {
     DWORD key_flags;
     DWORD lRv;
@@ -27,7 +12,7 @@ static bool readwritejitkey(wchar_t* jit_key_value, DWORD* jit_key_vale_size, ch
 
     if(write)
     {
-        if(!IsProcessElevated())
+        if(!BridgeIsProcessElevated())
         {
             if(error != NULL)
                 *error = ERROR_RW_NOTADMIN;
@@ -77,7 +62,7 @@ static bool readwritejitkey(wchar_t* jit_key_value, DWORD* jit_key_vale_size, ch
         if(lRv != ERROR_SUCCESS)
             return false;
 
-        lRv = RegSetValueExW(hKey, StringUtils::Utf8ToUtf16(key).c_str(), 0, REG_SZ, (BYTE*)jit_key_value, (DWORD)(*jit_key_vale_size) + 1);
+        lRv = RegSetValueExW(hKey, StringUtils::Utf8ToUtf16(key).c_str(), 0, REG_SZ, (const BYTE*)jit_key_value, (DWORD)(*jit_key_vale_size) + 1);
     }
     else
     {
@@ -140,7 +125,7 @@ bool dbgsetjitauto(bool auto_on, arch arch_in, arch* arch_out, readwritejitkey_e
                 return true;
         }
     }
-    if(!readwritejitkey(auto_on ? L"1" : L"0", &auto_string_size, "Auto", arch_in, arch_out, &rw_error, true))
+    if(!readwritejitkey((wchar_t*)(auto_on ? L"1" : L"0"), &auto_string_size, "Auto", arch_in, arch_out, &rw_error, true))
     {
         if(rw_error_out != NULL)
             *rw_error_out = rw_error;
@@ -170,13 +155,13 @@ bool dbggetdefjit(char* jit_entry)
     path[0] = '"';
     wchar_t wszPath[MAX_PATH] = L"";
     GetModuleFileNameW(GetModuleHandleW(NULL), wszPath, MAX_PATH);
-    strcpy_s(&path[1], JIT_ENTRY_DEF_SIZE - 1, StringUtils::Utf16ToUtf8(wszPath).c_str());
-    strcat(path, ATTACH_CMD_LINE);
-    strcpy_s(jit_entry, JIT_ENTRY_DEF_SIZE, path);
+    strncpy_s(&path[1], JIT_ENTRY_DEF_SIZE - 1, StringUtils::Utf16ToUtf8(wszPath).c_str(), _TRUNCATE);
+    strncat_s(path, ATTACH_CMD_LINE, _TRUNCATE);
+    strncpy_s(jit_entry, JIT_ENTRY_DEF_SIZE, path, _TRUNCATE);
     return true;
 }
 
-bool dbgsetjit(char* jit_cmd, arch arch_in, arch* arch_out, readwritejitkey_error_t* rw_error_out)
+bool dbgsetjit(const char* jit_cmd, arch arch_in, arch* arch_out, readwritejitkey_error_t* rw_error_out)
 {
     DWORD jit_cmd_size = (DWORD)strlen(jit_cmd) * sizeof(wchar_t);
     readwritejitkey_error_t rw_error;

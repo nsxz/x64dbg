@@ -1,11 +1,35 @@
 #include "loop.h"
+#include "_plugins.h"
 #include "memory.h"
+#include "plugin_loader.h"
 #include "threading.h"
 #include "module.h"
+#include "debugger.h"
+#include "database_cb_batcher.h"
 
-std::map<DepthModuleRange, LOOPSINFO, DepthModuleRangeCompare> loops;
+static std::map<DepthModuleRange, LOOPSINFO, DepthModuleRangeCompare> loops;
 
-bool LoopAdd(duint Start, duint End, bool Manual)
+static void populateDbOperation(DbOperation & op, const LOOPSINFO & info)
+{
+    op.itemType = DbItemTypeLoop;
+    op.manual = info.manual;
+    op.modhash = info.modhash;
+    op.address = info.start;
+    op.loop.end = info.end;
+    op.loop.parent = info.parent;
+    op.loop.icount = info.instructioncount;
+    op.loop.depth = info.depth;
+}
+
+static void notifyDbOperation(DbOperationType opType, const LOOPSINFO & info, bool loading = false)
+{
+    DbOperation op {};
+    op.opType = opType;
+    populateDbOperation(op, info);
+    DbCallbackBatcher::Add(op, loading);
+}
+
+bool LoopAdd(duint Start, duint End, bool Manual, duint instructionCount)
 {
     ASSERT_DEBUGGING("Export call");
 
@@ -26,8 +50,20 @@ bool LoopAdd(duint Start, duint End, bool Manual)
     // Loops cannot overlap other loops
     int finalDepth = 0;
 
-    if(LoopOverlaps(0, Start, End, &finalDepth))
-        return false;
+    bool surround = false;
+    duint finalStart = 0, finalEnd = 0;
+    if(LoopOverlaps(0, Start, End, &finalDepth, &finalStart, &finalEnd))
+    {
+        if(Start <= finalStart && End >= finalEnd)
+        {
+            surround = true;
+            finalDepth = 0;
+        }
+        else
+        {
+            return false;
+        }
+    }
 
     // Fill out loop information structure
     LOOPSINFO loopInfo;
@@ -35,23 +71,74 @@ bool LoopAdd(duint Start, duint End, bool Manual)
     loopInfo.end = End - moduleBase;
     loopInfo.depth = finalDepth;
     loopInfo.manual = Manual;
-    ModNameFromAddr(Start, loopInfo.mod, true);
+    loopInfo.instructioncount = instructionCount;
+    loopInfo.modhash = ModHashFromAddr(moduleBase);
+    loopInfo.parent = 0;
 
     // Link this to a parent loop if one does exist
     if(finalDepth)
         LoopGet(finalDepth - 1, Start, &loopInfo.parent, 0);
     else
         loopInfo.parent = 0;
+    if(loopInfo.parent)
+        loopInfo.parent -= moduleBase;
 
-    EXCLUSIVE_ACQUIRE(LockLoops);
+    std::vector<std::pair<LOOPSINFO, LOOPSINFO>> depthChanges;
+    {
+        EXCLUSIVE_ACQUIRE(LockLoops);
 
-    // Insert into list
-    loops.insert(std::make_pair(DepthModuleRange(finalDepth, ModuleRange(ModHashFromAddr(moduleBase), Range(loopInfo.start, loopInfo.end))), loopInfo));
+        if(surround)
+        {
+            // TODO: make this algorithm smarter, now it's O(n), but can be O(logn) with lower_bound
+            // However, this is probably an edge case, so we can not care for now
+            std::vector<std::pair<DepthModuleRange, LOOPSINFO>> reinsert;
+            for(auto loopItr = loops.begin(); loopItr != loops.end();)
+            {
+                auto & loop = loopItr->second;
+                if(loopInfo.modhash == loop.modhash && loopInfo.start <= loop.start && loopInfo.end >= loop.end)
+                {
+                    reinsert.emplace_back(loopItr->first, loopItr->second);
+                    loopItr = loops.erase(loopItr);
+                }
+                else
+                {
+                    ++loopItr;
+                }
+            }
+            depthChanges.reserve(reinsert.size());
+            for(auto & loop : reinsert)
+            {
+                LOOPSINFO oldInfo = loop.second;
+                loop.first.first++;
+                loop.second.depth++;
+                depthChanges.emplace_back(oldInfo, loop.second);
+                loops.insert(loop);
+            }
+        }
+
+        // Insert into list
+        loops.emplace(DepthModuleRange(finalDepth, ModuleRange(loopInfo.modhash, Range(loopInfo.start, loopInfo.end))), loopInfo);
+    }
+
+    if(depthChanges.empty())
+    {
+        notifyDbOperation(DbOperationTypeAdd, loopInfo);
+    }
+    else
+    {
+        DbCallbackBatcher batcher;
+        for(const auto & depthChange : depthChanges)
+            notifyDbOperation(DbOperationTypeRemove, depthChange.first);
+        notifyDbOperation(DbOperationTypeAdd, loopInfo);
+        for(const auto & depthChange : depthChanges)
+            notifyDbOperation(DbOperationTypeAdd, depthChange.second);
+    }
+
     return true;
 }
 
 // Get the start/end of a loop at a certain depth and address
-bool LoopGet(int Depth, duint Address, duint* Start, duint* End)
+bool LoopGet(int Depth, duint Address, duint* Start, duint* End, duint* InstructionCount)
 {
     ASSERT_DEBUGGING("Export call");
 
@@ -76,65 +163,110 @@ bool LoopGet(int Depth, duint Address, duint* Start, duint* End)
     if(End)
         *End = found->second.end + moduleBase;
 
+    if(InstructionCount)
+        *InstructionCount = found->second.instructioncount;
+
     return true;
 }
 
 // Check if a loop overlaps a range, inside is not overlapping
-bool LoopOverlaps(int Depth, duint Start, duint End, int* FinalDepth)
+bool LoopOverlaps(int Depth, duint Start, duint End, int* FinalDepth, duint* FinalStart, duint* FinalEnd)
 {
     ASSERT_DEBUGGING("Export call");
 
     // Determine module addresses and lookup keys
     const duint moduleBase = ModBaseFromAddr(Start);
-    const duint key = ModHashFromAddr(moduleBase);
 
-    duint curStart = Start - moduleBase;
-    duint curEnd = End - moduleBase;
+    // Virtual addresses to relative addresses
+    Start -= moduleBase;
+    End -= moduleBase;
 
-    SHARED_ACQUIRE(LockLoops);
-
-    // Check if the new loop fits in the old loop
-    for(auto & itr : loops)
-    {
-        // Only look in the current module
-        if(itr.first.second.first != key)
-            continue;
-
-        // Loop must be at this recursive depth
-        if(itr.second.depth != Depth)
-            continue;
-
-        if(itr.second.start < curStart && itr.second.end > curEnd)
-            return LoopOverlaps(Depth + 1, curStart, curEnd, FinalDepth);
-    }
-
-    // Did the user request t the loop depth?
+    // The last recursive call will set FinalDepth last
     if(FinalDepth)
         *FinalDepth = Depth;
 
-    // Check for loop overlaps
-    for(auto & itr : loops)
+    SHARED_ACQUIRE(LockLoops);
+
+    auto found = loops.find(DepthModuleRange(Depth, ModuleRange(ModHashFromAddr(moduleBase), Range(Start, End))));
+    if(found == loops.end())
+        return false;
+
+    if(found->second.start <= Start && found->second.end >= End)
+        return LoopOverlaps(Depth + 1, Start + moduleBase, End + moduleBase, FinalDepth, FinalStart, FinalEnd);
+
+    if(FinalStart)
+        *FinalStart = found->second.start + moduleBase;
+
+    if(FinalEnd)
+        *FinalEnd = found->second.end + moduleBase;
+
+    return true;
+}
+
+static bool LoopDeleteAllRange(const DepthModuleRange & range, std::vector<LOOPSINFO> & erasedLoops)
+{
+    auto erased = 0;
+    for(auto found = loops.find(range); found != loops.end(); found = loops.find(range), erased++)
     {
-        // Only look in the current module
-        if(itr.first.second.first != key)
-            continue;
-
-        // Loop must be at this recursive depth
-        if(itr.second.depth != Depth)
-            continue;
-
-        if(itr.second.start <= curEnd && itr.second.end >= curStart)
-            return true;
+        erasedLoops.push_back(found->second);
+        loops.erase(found);
     }
+    return erased > 0;
+}
 
-    return false;
+void LoopDeleteRange(duint Start, duint End)
+{
+    DbCallbackBatcher batcher;
+
+    auto modBase = ModBaseFromAddr(Start);
+    auto modHash = ModHashFromAddr(modBase);
+
+    std::vector<LOOPSINFO> erasedLoops;
+    {
+        EXCLUSIVE_ACQUIRE(LockLoops);
+
+        // Delete all loops in the given range increasing the depth until nothing is left to delete
+        auto range = DepthModuleRange(0, ModuleRange(modHash, Range(Start - modBase, End - modBase)));
+        while(LoopDeleteAllRange(range, erasedLoops))
+            range.first++;
+    }
+    for(const LOOPSINFO & loop : erasedLoops)
+    {
+        notifyDbOperation(DbOperationTypeRemove, loop);
+    }
 }
 
 // This should delete a loop and all sub-loops that matches a certain addr
 bool LoopDelete(int Depth, duint Address)
 {
-    ASSERT_ALWAYS("Function unimplemented");
-    return false;
+    DbCallbackBatcher batcher;
+
+    // Get the virtual address module
+    const duint moduleBase = ModBaseFromAddr(Address);
+
+    // Virtual address to relative address
+    Address -= moduleBase;
+
+    std::vector<LOOPSINFO> erasedLoops;
+    {
+        EXCLUSIVE_ACQUIRE(LockLoops);
+
+        // Search with this address range
+        auto found = loops.find(DepthModuleRange(Depth, ModuleRange(ModHashFromAddr(moduleBase), Range(Address, Address))));
+        if(found == loops.end())
+            return false;
+
+        // Delete all loops in the given range increasing the depth until nothing is left to delete
+        auto range = found->first;
+        while(LoopDeleteAllRange(range, erasedLoops))
+            range.first++;
+    }
+    for(const LOOPSINFO & loop : erasedLoops)
+    {
+        notifyDbOperation(DbOperationTypeRemove, loop);
+    }
+
+    return true;
 }
 
 void LoopCacheSave(JSON Root)
@@ -151,11 +283,12 @@ void LoopCacheSave(JSON Root)
         const LOOPSINFO & currentLoop = itr.second;
         JSON currentJson = json_object();
 
-        json_object_set_new(currentJson, "module", json_string(currentLoop.mod));
+        json_object_set_new(currentJson, "module", json_string(currentLoop.mod().c_str()));
         json_object_set_new(currentJson, "start", json_hex(currentLoop.start));
         json_object_set_new(currentJson, "end", json_hex(currentLoop.end));
         json_object_set_new(currentJson, "depth", json_integer(currentLoop.depth));
         json_object_set_new(currentJson, "parent", json_hex(currentLoop.parent));
+        json_object_set_new(currentJson, "icount", json_hex(currentLoop.instructioncount));
 
         if(currentLoop.manual)
             json_array_append_new(jsonLoops, currentJson);
@@ -177,43 +310,46 @@ void LoopCacheSave(JSON Root)
 
 void LoopCacheLoad(JSON Root)
 {
-    EXCLUSIVE_ACQUIRE(LockLoops);
+    DbCallbackBatcher batcher(true);
 
     // Inline lambda to parse each JSON entry
     auto AddLoops = [](const JSON Object, bool Manual)
     {
+        auto active = DbCallbackBatcher::IsActive(true);
         size_t i;
         JSON value;
 
         json_array_foreach(Object, i, value)
         {
             LOOPSINFO loopInfo;
-            memset(&loopInfo, 0, sizeof(LOOPSINFO));
 
             // Module name
             const char* mod = json_string_value(json_object_get(value, "module"));
-
-            if(mod && strlen(mod) < MAX_MODULE_SIZE)
-                strcpy_s(loopInfo.mod, mod);
+            loopInfo.modhash = ModHashFromName(mod);
 
             // All other variables
             loopInfo.start = (duint)json_hex_value(json_object_get(value, "start"));
             loopInfo.end = (duint)json_hex_value(json_object_get(value, "end"));
             loopInfo.depth = (int)json_integer_value(json_object_get(value, "depth"));
             loopInfo.parent = (duint)json_hex_value(json_object_get(value, "parent"));
+            loopInfo.instructioncount = (duint)json_hex_value(json_object_get(value, "icount"));
             loopInfo.manual = Manual;
 
-            // Sanity check: Make sure the loop starts before it ends
+            // Coherence check: Make sure the loop starts before it ends
             if(loopInfo.end < loopInfo.start)
                 continue;
 
-            // Insert into global list
-            loops.insert(std::make_pair(DepthModuleRange(loopInfo.depth, ModuleRange(ModHashFromName(loopInfo.mod), Range(loopInfo.start, loopInfo.end))), loopInfo));
+            {
+                EXCLUSIVE_ACQUIRE(LockLoops);
+
+                // Insert into global list
+                loops[DepthModuleRange(loopInfo.depth, ModuleRange(loopInfo.modhash, Range(loopInfo.start, loopInfo.end)))] = loopInfo;
+            }
+
+            if(active)
+                notifyDbOperation(DbOperationTypeAdd, loopInfo, true);
         }
     };
-
-    // Remove existing entries
-    loops.clear();
 
     const JSON jsonLoops = json_object_get(Root, "loops");
     const JSON jsonAutoLoops = json_object_get(Root, "autoloops");
@@ -247,7 +383,7 @@ bool LoopEnum(LOOPSINFO* List, size_t* Size)
         *List = itr.second;
 
         // Adjust the offset to a real virtual address
-        duint modbase = ModBaseFromName(List->mod);
+        duint modbase = ModBaseFromName(List->mod().c_str());
         List->start += modbase;
         List->end += modbase;
 
@@ -257,8 +393,22 @@ bool LoopEnum(LOOPSINFO* List, size_t* Size)
     return true;
 }
 
-void LoopClear()
+void LoopClear(bool Terminating)
 {
-    EXCLUSIVE_ACQUIRE(LockLoops);
-    loops.clear();
+    DbCallbackBatcher batcher;
+    std::map<DepthModuleRange, LOOPSINFO, DepthModuleRangeCompare> empty;
+
+    {
+        EXCLUSIVE_ACQUIRE(LockLoops);
+        std::swap(loops, empty);
+    }
+
+    // Do not report termination clear as a DbOperation
+    if(Terminating)
+        return;
+
+    for(auto & itr : empty)
+    {
+        notifyDbOperation(DbOperationTypeRemove, itr.second);
+    }
 }

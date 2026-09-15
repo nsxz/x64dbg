@@ -7,6 +7,11 @@ SCRIPT_EXPORT bool Script::Label::Set(duint addr, const char* text, bool manual)
     return LabelSet(addr, text, manual);
 }
 
+SCRIPT_EXPORT bool Script::Label::Set(duint addr, const char* text, bool manual, bool temporary)
+{
+    return LabelSet(addr, text, manual, temporary);
+}
+
 SCRIPT_EXPORT bool Script::Label::Set(const LabelInfo* info)
 {
     if(!info)
@@ -14,7 +19,7 @@ SCRIPT_EXPORT bool Script::Label::Set(const LabelInfo* info)
     auto base = Module::BaseFromName(info->mod);
     if(!base)
         return false;
-    return Set(base + info->rva, info->text, info->manual);
+    return Set(base + info->rva, info->text, info->manual, false);
 }
 
 SCRIPT_EXPORT bool Script::Label::FromString(const char* label, duint* addr)
@@ -27,6 +32,11 @@ SCRIPT_EXPORT bool Script::Label::Get(duint addr, char* text)
     return LabelGet(addr, text);
 }
 
+SCRIPT_EXPORT bool Script::Label::IsTemporary(duint addr)
+{
+    return LabelIsTemporary(addr);
+}
+
 SCRIPT_EXPORT bool Script::Label::GetInfo(duint addr, LabelInfo* info)
 {
     LABELSINFO label;
@@ -34,9 +44,9 @@ SCRIPT_EXPORT bool Script::Label::GetInfo(duint addr, LabelInfo* info)
         return false;
     if(info)
     {
-        strcpy_s(info->mod, label.mod);
+        strcpy_s(info->mod, label.mod().c_str());
         info->rva = label.addr;
-        strcpy_s(info->text, label.text);
+        strcpy_s(info->text, label.text.c_str());
         info->manual = label.manual;
     }
     return true;
@@ -54,7 +64,7 @@ SCRIPT_EXPORT void Script::Label::DeleteRange(duint start, duint end)
 
 SCRIPT_EXPORT void Script::Label::Clear()
 {
-    LabelClear();
+    LabelClear(false);
 }
 
 SCRIPT_EXPORT bool Script::Label::GetList(ListOf(LabelInfo) list)
@@ -66,9 +76,9 @@ SCRIPT_EXPORT bool Script::Label::GetList(ListOf(LabelInfo) list)
     for(const auto & label : labelList)
     {
         LabelInfo scriptLabel;
-        strcpy_s(scriptLabel.mod, label.mod);
+        strcpy_s(scriptLabel.mod, label.mod().c_str());
         scriptLabel.rva = label.addr;
-        strcpy_s(scriptLabel.text, label.text);
+        strcpy_s(scriptLabel.text, label.text.c_str());
         scriptLabel.manual = label.manual;
         labelScriptList.push_back(scriptLabel);
     }

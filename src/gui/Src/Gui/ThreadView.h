@@ -1,5 +1,4 @@
-#ifndef THREADVIEW_H
-#define THREADVIEW_H
+#pragma once
 
 #include "StdTable.h"
 #include <QMenu>
@@ -8,45 +7,43 @@ class ThreadView : public StdTable
 {
     Q_OBJECT
 public:
-    explicit ThreadView(StdTable* parent = 0);
-    QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h);
+    explicit ThreadView(StdTable* parent = nullptr);
+    QString paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h) override;
     void setupContextMenu();
 
-public slots:
-    void updateThreadList();
-    void doubleClickedSlot();
-    void SwitchThread();
-    void SuspendThread();
-    void ResumeThread();
-    void KillThread();
-    void GoToThreadEntry();
-    void contextMenuSlot(const QPoint & pos);
-    void SetPriorityIdleSlot();
-    void SetPriorityAboveNormalSlot();
-    void SetPriorityBelowNormalSlot();
-    void SetPriorityHighestSlot();
-    void SetPriorityLowestSlot();
-    void SetPriorityNormalSlot();
-    void SetPriorityTimeCriticalSlot();
-
 signals:
-    void showCpu();
+    void displayThreadsView();
+
+public slots:
+    void selectionThreadsSet(const SELECTIONDATA* selection);
+    void selectionThreadsGet(SELECTIONDATA* selection);
+    void updateThreadListSlot();
+    void doubleClickedSlot();
+    void execCommandSlot();
+    void gotoThreadEntrySlot();
+    void contextMenuSlot(const QPoint & pos);
+    void setNameSlot();
 
 private:
-    QString mCurrentThreadId;
-    QAction* mSwitchThread;
-    QAction* mSuspendThread;
-    QAction* mGoToThreadEntry;
-    QAction* mResumeThread;
-    QAction* mKillThread;
-    QAction* mSetPriorityIdle;
-    QAction* mSetPriorityAboveNormal;
-    QAction* mSetPriorityBelowNormal;
-    QAction* mSetPriorityHighest;
-    QAction* mSetPriorityLowest;
-    QAction* mSetPriorityNormal;
-    QAction* mSetPriorityTimeCritical;
-    QMenu* mSetPriority;
-};
+    QAction* makeCommandAction(QAction* action, const QString & command);
+    duint mCurrentThreadId;
+    MenuBuilder* mMenuBuilder;
 
-#endif // THREADVIEW_H
+    enum
+    {
+        ColNumber = 0,
+        ColThreadId,
+        ColEntry,
+        ColTeb,
+        ColCip,
+        ColSuspendCount,
+        ColPriority,
+        ColWaitReason,
+        ColLastError,
+        ColUserTime,
+        ColKernelTime,
+        ColCreationTime,
+        ColCpuCycles,
+        ColThreadName,
+    };
+};

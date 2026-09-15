@@ -6,11 +6,13 @@
 
 #include "variable.h"
 #include "threading.h"
+#include <map>
+#include <algorithm>
 
 /**
 \brief The container that stores all variables.
 */
-std::map<String, VAR, CaseInsensitiveCompare> variables;
+std::map<String, VAR, StringUtils::CaseInsensitiveLess> variables;
 
 /**
 \brief Sets a variable with a value.
@@ -43,15 +45,10 @@ bool varset(const char* Name, VAR_VALUE* Value, bool ReadOnly)
         name_ = "$";
     name_ += Name;
     auto found = variables.find(name_);
-    if(found == variables.end())  //not found
+    if(found == variables.end()) //not found
         return false;
     if(found->second.alias.length())
-    {
-        // Release the lock (potential deadlock here)
-        EXCLUSIVE_RELEASE();
-
         return varset(found->second.alias.c_str(), Value, ReadOnly);
-    }
 
     if(!ReadOnly && (found->second.type == VAR_READONLY || found->second.type == VAR_HIDDEN))
         return false;
@@ -72,6 +69,8 @@ void varinit()
     varnew("$result2\1$res2", 0, VAR_SYSTEM);
     varnew("$result3\1$res3", 0, VAR_SYSTEM);
     varnew("$result4\1$res4", 0, VAR_SYSTEM);
+    varnew("$__disasm_refindex", 0, VAR_SYSTEM);
+    varnew("$__dump_refindex", 0, VAR_SYSTEM);
 
     // InitDebug variables
     varnew("$hProcess\1$hp", 0, VAR_READONLY);  // Process handle
@@ -79,6 +78,17 @@ void varinit()
 
     // Hidden variables
     varnew("$ans\1$an", 0, VAR_HIDDEN);
+
+    // Breakpoint variables
+    varnew("$breakpointcounter", 0, VAR_READONLY);
+    varnew("$breakpointcondition", 0, VAR_SYSTEM);
+    varnew("$breakpointlogcondition", 0, VAR_READONLY);
+    varnew("$breakpointexceptionaddress", 0, VAR_READONLY);
+
+    // Tracing variables
+    varnew("$tracecounter", 0, VAR_READONLY);
+    varnew("$tracecondition", 0, VAR_SYSTEM);
+    varnew("$tracelogcondition", 0, VAR_READONLY);
 
     // Read-only variables
     varnew("$lastalloc", 0, VAR_READONLY);  // Last memory allocation
@@ -125,11 +135,17 @@ bool varnew(const char* Name, duint Value, VAR_TYPE Type)
     {
         String name_;
         Name = names.at(i).c_str();
-        if(*Name != '$')
+        if(*Name == '$')
+        {
+            name_ = Name;
+        }
+        else
+        {
             name_ = "$";
-        name_ += Name;
+            name_ += Name;
+        }
         if(!i)
-            firstName = Name;
+            firstName = name_;
         if(variables.find(name_) != variables.end()) //found
             return false;
         VAR var;
@@ -140,7 +156,7 @@ bool varnew(const char* Name, duint Value, VAR_TYPE Type)
         var.value.size = sizeof(duint);
         var.value.type = VAR_UINT;
         var.value.u.value = Value;
-        variables.insert(std::make_pair(name_, var));
+        variables.emplace(name_, var);
     }
     return true;
 }
@@ -158,19 +174,20 @@ bool varget(const char* Name, VAR_VALUE* Value, int* Size, VAR_TYPE* Type)
     SHARED_ACQUIRE(LockVariables);
 
     String name_;
-    if(*Name != '$')
+    if(*Name == '$')
+    {
+        name_ = Name;
+    }
+    else
+    {
         name_ = "$";
-    name_ += Name;
+        name_ += Name;
+    }
     auto found = variables.find(name_);
     if(found == variables.end()) //not found
         return false;
-    if(found->second.alias.length())
-    {
-        // Release the lock (potential deadlock here)
-        SHARED_RELEASE();
-
+    if(!found->second.alias.empty())
         return varget(found->second.alias.c_str(), Value, Size, Type);
-    }
     if(Type)
         *Type = found->second.type;
     if(Size)
@@ -224,7 +241,7 @@ bool varget(const char* Name, char* String, int* Size, VAR_TYPE* Type)
     if(Type)
         *Type = vartype;
     if(String)
-        memcpy(String, varvalue.u.data->data(), varsize);
+        memcpy(String, varvalue.u.data->data(), Size ? std::min(*Size, varsize) : varsize);
     return true;
 }
 
@@ -281,9 +298,9 @@ bool varset(const char* Name, const char* Value, bool ReadOnly)
 \brief Deletes a variable.
 \param Name The name of the variable to delete. Cannot be null.
 \param DelSystem true to allow deleting system variables.
-\return true if the variable was deleted successfully, false otherwise.
+\return 0 if the variable was deleted successfully, -1 when variable doesn't exist, -2 when a user could not delete a system variable, -3 when unknown reason caused a variable couldn't be deleted
 */
-bool vardel(const char* Name, bool DelSystem)
+int vardel(const char* Name, bool DelSystem)
 {
     EXCLUSIVE_ACQUIRE(LockVariables);
 
@@ -293,7 +310,7 @@ bool vardel(const char* Name, bool DelSystem)
     name_ += Name;
     auto found = variables.find(name_);
     if(found == variables.end()) //not found
-        return false;
+        return -1;
     if(found->second.alias.length())
     {
         // Release the lock (potential deadlock here)
@@ -303,16 +320,21 @@ bool vardel(const char* Name, bool DelSystem)
     }
 
     if(!DelSystem && found->second.type != VAR_USER)
-        return false;
+        return -2;
     found = variables.begin();
+    String NameString(name_);
+    bool deleted = false;
     while(found != variables.end())
     {
-        auto del = found;
-        found++;
-        if(found->second.name == String(Name))
-            variables.erase(del);
+        if(found->first == NameString || found->second.alias == NameString)
+        {
+            found = variables.erase(found); // Invalidate iterators
+            deleted = true;
+        }
+        else
+            found++;
     }
-    return true;
+    return deleted ? 0 : -3; //We should have deleted a variable, failing at here is a bug
 }
 
 /**
@@ -342,35 +364,15 @@ bool vargettype(const char* Name, VAR_TYPE* Type, VAR_VALUE_TYPE* ValueType)
     return true;
 }
 
-/**
-\brief Enumerates all variables.
-\param [in,out] List A pointer to place the variables in. If null, \p cbsize will be filled to the number of bytes required.
-\param [in,out] Size This function retrieves the number of bytes required to store all variables. Can be null if \p entries is not null.
-\return true if it succeeds, false if it fails.
-*/
-bool varenum(VAR* List, size_t* Size)
+std::vector<VAR> varenum()
 {
-    // A list or size must be requested
-    if(!List && !Size)
-        return false;
-
     SHARED_ACQUIRE(LockVariables);
 
-    if(Size)
+    std::vector<VAR> vars;
+    vars.reserve(variables.size());
+    for(const auto & itr : variables)
     {
-        // Size requested, so return it
-        *Size = variables.size() * sizeof(VAR);
-
-        if(!List)
-            return true;
+        vars.push_back(itr.second);
     }
-
-    // Fill out all list entries
-    for(auto & itr : variables)
-    {
-        *List = itr.second;
-        List++;
-    }
-
-    return true;
+    return vars;
 }

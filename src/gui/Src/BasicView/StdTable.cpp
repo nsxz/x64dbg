@@ -1,267 +1,48 @@
 #include "StdTable.h"
 #include "Bridge.h"
 
-StdTable::StdTable(QWidget* parent) : AbstractTableView(parent)
+StdTable::StdTable(QWidget* parent) : AbstractStdTable(parent)
 {
-    SelectionData_t data;
-    memset(&data, 0, sizeof(SelectionData_t));
-    mSelection = data;
-
-    mIsMultiSelctionAllowed = false;
-    mIsColumnSortingAllowed = true;
-
-    mData.clear();
-    mSort.first = -1;
-
-    mGuiState = StdTable::NoState;
-
-    mCopyMenuOnly = false;
-    mCopyMenuDebugOnly = true;
-    setContextMenuPolicy(Qt::CustomContextMenu);
-
-    connect(Bridge::getBridge(), SIGNAL(repaintTableView()), this, SLOT(reloadData()));
-    connect(this, SIGNAL(customContextMenuRequested(QPoint)), this, SLOT(contextMenuRequestedSlot(QPoint)));
-    connect(this, SIGNAL(headerButtonPressed(int)), this, SLOT(headerButtonPressedSlot(int)));
-}
-
-QString StdTable::paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h)
-{
-    if(isSelected(rowBase, rowOffset) == true)
-        painter->fillRect(QRect(x, y, w, h), QBrush(selectionColor));
-    return getCellContent(rowBase + rowOffset, col);
-}
-
-void StdTable::mouseMoveEvent(QMouseEvent* event)
-{
-    bool wAccept = true;
-
-    if(mGuiState == StdTable::MultiRowsSelectionState)
-    {
-        //qDebug() << "State = MultiRowsSelectionState";
-
-        if((transY(event->y()) >= 0) && (transY(event->y()) <= this->getTableHeigth()))
-        {
-            int wRowIndex = getTableOffset() + getIndexOffsetFromY(transY(event->y()));
-
-            if(wRowIndex < getRowCount())
-            {
-                if(mIsMultiSelctionAllowed == true)
-                    expandSelectionUpTo(wRowIndex);
-                else
-                    setSingleSelection(wRowIndex);
-
-                updateViewport();
-
-                wAccept = false;
-            }
-        }
-    }
-
-    if(wAccept == true)
-        AbstractTableView::mouseMoveEvent(event);
-}
-
-void StdTable::mousePressEvent(QMouseEvent* event)
-{
-    bool wAccept = false;
-
-    if(((event->buttons() & Qt::LeftButton) != 0) && ((event->buttons() & Qt::RightButton) == 0))
-    {
-        if(getGuiState() == AbstractTableView::NoState)
-        {
-            if(event->y() > getHeaderHeight())
-            {
-                int wRowIndex = getTableOffset() + getIndexOffsetFromY(transY(event->y()));
-
-                if(wRowIndex < getRowCount())
-                {
-                    if(mIsMultiSelctionAllowed && (event->modifiers() & Qt::ShiftModifier))
-                        expandSelectionUpTo(wRowIndex);
-                    else
-                        setSingleSelection(wRowIndex);
-
-                    mGuiState = StdTable::MultiRowsSelectionState;
-
-                    updateViewport();
-
-                    wAccept = true;
-                }
-            }
-        }
-    }
-
-    if(wAccept == false)
-        AbstractTableView::mousePressEvent(event);
-}
-
-void StdTable::mouseDoubleClickEvent(QMouseEvent* event)
-{
-    if(event->y() > getHeaderHeight() && event->button() == Qt::LeftButton)
-        emit doubleClickedSignal();
-    AbstractTableView::mouseDoubleClickEvent(event);
-}
-
-void StdTable::mouseReleaseEvent(QMouseEvent* event)
-{
-    bool wAccept = true;
-
-    if((event->buttons() & Qt::LeftButton) == 0)
-    {
-        if(mGuiState == StdTable::MultiRowsSelectionState)
-        {
-            mGuiState = StdTable::NoState;
-
-            updateViewport();
-
-            wAccept = false;
-        }
-    }
-
-    if(wAccept == true)
-        AbstractTableView::mouseReleaseEvent(event);
-}
-
-void StdTable::keyPressEvent(QKeyEvent* event)
-{
-    emit keyPressedSignal(event);
-    int key = event->key();
-
-    if(key == Qt::Key_Up || key == Qt::Key_Down)
-    {
-        dsint wBotIndex = getTableOffset();
-        dsint wTopIndex = wBotIndex + getNbrOfLineToPrint() - 1;
-
-        if(key == Qt::Key_Up)
-            selectPrevious();
-        else
-            selectNext();
-
-        if(getInitialSelection() < wBotIndex)
-        {
-            setTableOffset(getInitialSelection());
-        }
-        else if(getInitialSelection() >= wTopIndex)
-        {
-            setTableOffset(getInitialSelection() - getNbrOfLineToPrint() + 2);
-        }
-
-        updateViewport();
-    }
-    else
-    {
-        AbstractTableView::keyPressEvent(event);
-    }
-}
-
-void StdTable::enableMultiSelection(bool enabled)
-{
-    mIsMultiSelctionAllowed = enabled;
-}
-
-void StdTable::enableColumnSorting(bool enabled)
-{
-    mIsColumnSortingAllowed = enabled;
 }
 
 /************************************************************************************
-                                Selection Management
+                                   Sorting
 ************************************************************************************/
-void StdTable::expandSelectionUpTo(int to)
+bool StdTable::SortBy::AsText(const QString & a, const QString & b)
 {
-    if(to < mSelection.firstSelectedIndex)
-    {
-        mSelection.fromIndex = to;
-        mSelection.toIndex = mSelection.firstSelectedIndex;
-    }
-    else if(to > mSelection.firstSelectedIndex)
-    {
-        mSelection.fromIndex = mSelection.firstSelectedIndex;
-        mSelection.toIndex = to;
-    }
-    else if(to == mSelection.firstSelectedIndex)
-    {
-        setSingleSelection(to);
-    }
+    return QString::compare(a, b) < 0;
 }
 
-void StdTable::setSingleSelection(int index)
+bool StdTable::SortBy::AsInt(const QString & a, const QString & b)
 {
-    mSelection.firstSelectedIndex = index;
-    mSelection.fromIndex = index;
-    mSelection.toIndex = index;
-    emit selectionChangedSignal(index);
+    return a.toLongLong() < b.toLongLong();
 }
 
-int StdTable::getInitialSelection()
+bool StdTable::SortBy::AsHex(const QString & a, const QString & b)
 {
-    return mSelection.firstSelectedIndex;
-}
-
-void StdTable::selectNext()
-{
-    int wNext = getInitialSelection() + 1;
-
-    // Bounding
-    wNext = wNext > getRowCount() - 1 ? getRowCount() - 1 : wNext;
-    wNext = wNext < 0  ? 0 : wNext;
-
-    setSingleSelection(wNext);
-}
-
-void StdTable::selectPrevious()
-{
-    int wNext = getInitialSelection() - 1;
-
-    // Bounding
-    wNext = wNext > getRowCount() - 1 ? getRowCount() - 1 : wNext;
-    wNext = wNext < 0  ? 0 : wNext;
-
-    setSingleSelection(wNext);
-}
-
-bool StdTable::isSelected(int base, int offset)
-{
-    int wIndex = base + offset;
-
-    if(wIndex >= mSelection.fromIndex && wIndex <= mSelection.toIndex)
-        return true;
-    else
-        return false;
+    return a.toLongLong(0, 16) < b.toLongLong(0, 16);
 }
 
 /************************************************************************************
                                 Data Management
 ************************************************************************************/
-void StdTable::addColumnAt(int width, QString title, bool isClickable, QString copyTitle)
+void StdTable::addColumnAt(int width, QString title, bool isClickable, QString copyTitle, SortBy::t sortFn)
 {
     AbstractTableView::addColumnAt(width, title, isClickable);
 
     //append empty column to list of rows
-    for(int i = 0; i < mData.size(); i++)
-        mData[i].append("");
+    for(size_t i = 0; i < mData.size(); i++)
+        mData[i].push_back(CellData());
 
     //Append copy title
     if(!copyTitle.length())
-        mCopyTitles.append(title);
+        mCopyTitles.push_back(title);
     else
-        mCopyTitles.append(copyTitle);
-}
+        mCopyTitles.push_back(copyTitle);
 
-void StdTable::setRowCount(int count)
-{
-    int wRowToAddOrRemove = count - mData.size();
-    for(int i = 0; i < qAbs(wRowToAddOrRemove); i++)
-    {
-        if(wRowToAddOrRemove > 0)
-        {
-            mData.append(QList<QString>());
-            for(int j = 0; j < getColumnCount(); j++)
-                mData.last().append("");
-        }
-        else
-            mData.removeLast();
-    }
-    AbstractTableView::setRowCount(count);
+    //append column sort function
+    mColumnSortFunctions.push_back(sortFn);
+    accessibilityTableModelChanged();
 }
 
 void StdTable::deleteAllColumns()
@@ -269,211 +50,72 @@ void StdTable::deleteAllColumns()
     setRowCount(0);
     AbstractTableView::deleteAllColumns();
     mCopyTitles.clear();
+    mColumnSortFunctions.clear();
+    accessibilityTableModelChanged();
 }
 
-void StdTable::setCellContent(int r, int c, QString s)
+void StdTable::setRowCount(duint count)
 {
-    if(isValidIndex(r, c) == true)
-        mData[r].replace(c, s);
+    auto oldSize = mData.size();
+    mData.resize(count);
+    if(oldSize < count)
+    {
+        for(duint i = oldSize; i < count; i++)
+        {
+            mData[i].resize(getColumnCount());
+        }
+    }
+    AbstractTableView::setRowCount(count);
+    accessibilityTableModelChanged();
 }
 
-QString StdTable::getCellContent(int r, int c)
+void StdTable::setCellContent(duint r, duint c, QString s)
 {
-    if(isValidIndex(r, c) == true)
-        return mData[r][c];
+    if(isValidIndex(r, c))
+        mData[r][c].text = std::move(s);
+}
+
+void StdTable::setCellContent(duint r, duint c, QString s, duint userdata)
+{
+    if(isValidIndex(r, c))
+    {
+        mData[r][c].text = std::move(s);
+        mData[r][c].userdata = userdata;
+    }
+}
+
+QString StdTable::getCellContent(duint r, duint c)
+{
+    if(isValidIndex(r, c))
+        return mData[r][c].text;
     else
         return QString("");
 }
 
-bool StdTable::isValidIndex(int r, int c)
+void StdTable::setCellUserdata(duint r, duint c, duint userdata)
 {
-    if(r < 0 || c < 0 || r >= mData.size())
+    if(isValidIndex(r, c))
+        mData[r][c].userdata = userdata;
+}
+
+duint StdTable::getCellUserdata(duint r, duint c)
+{
+    return isValidIndex(r, c) ? mData[r][c].userdata : 0;
+}
+
+bool StdTable::isValidIndex(duint r, duint c)
+{
+    if(r < 0 || c < 0 || r >= int(mData.size()))
         return false;
-    return c < mData.at(r).size();
+    return c < int(mData.at(r).size());
 }
 
-void StdTable::copyLineSlot()
+void StdTable::sortRows(duint column, bool ascending)
 {
-    int colCount = getColumnCount();
-    QString finalText = "";
-    if(colCount == 1)
-        finalText = getCellContent(getInitialSelection(), 0);
-    else
+    auto sortFn = mColumnSortFunctions.at(column);
+    std::stable_sort(mData.begin(), mData.end(), [column, ascending, &sortFn](const std::vector<CellData> & a, const std::vector<CellData> & b)
     {
-        for(int i = 0; i < colCount; i++)
-        {
-            QString cellContent = getCellContent(getInitialSelection(), i);
-            if(!cellContent.length()) //skip empty cells
-                continue;
-            QString title = mCopyTitles.at(i);
-            if(title.length())
-                finalText += title + "=";
-            while(cellContent.endsWith(" ")) cellContent.chop(1);
-            finalText += cellContent;
-            finalText += "\r\n";
-        }
-    }
-    Bridge::CopyToClipboard(finalText);
-}
-
-void StdTable::copyTable(std::function<int (int)> getMaxColumnLength)
-{
-    int colCount = getColumnCount();
-    int rowCount = getRowCount();
-    QString finalText = "";
-    if(colCount == 1)
-    {
-        for(int i = 0; i < rowCount; i++)
-        {
-            QString cellContent = getCellContent(i, 0);
-            if(!cellContent.length()) //skip empty cells
-                continue;
-            finalText += cellContent + "\r\n";
-        }
-    }
-    else
-    {
-        std::vector<int> colWidths;
-        for(int i = 0; i < colCount; i++)
-            colWidths.push_back(getMaxColumnLength(i));
-        for(int i = 0; i < colCount; i++)
-        {
-            if(i)
-                finalText += " ";
-            int colWidth = colWidths[i];
-            if(colWidth)
-                finalText += getColTitle(i).leftJustified(colWidth, QChar(' '), true);
-            else
-                finalText += getColTitle(i);
-        }
-        finalText += "\r\n";
-        for(int i = 0; i < rowCount; i++)
-        {
-            QString finalRowText = "";
-            for(int j = 0; j < colCount; j++)
-            {
-                if(j)
-                    finalRowText += " ";
-                QString cellContent = getCellContent(i, j);
-                int colWidth = colWidths[j];
-                if(colWidth && j != colCount - 1)
-                    finalRowText += cellContent.leftJustified(colWidth, QChar(' '), true);
-                else
-                    finalRowText += cellContent;
-            }
-            finalText += finalRowText + "\r\n";
-        }
-    }
-    Bridge::CopyToClipboard(finalText);
-}
-
-void StdTable::copyTableSlot()
-{
-    copyTable([this](int col)
-    {
-        return getColumnWidth(col) / getCharWidth();
+        auto less = sortFn(a.at(column).text, b.at(column).text);
+        return ascending ? less : !less;
     });
-}
-
-void StdTable::copyTableResizeSlot()
-{
-    copyTable([this](int col)
-    {
-        int max = 0;
-        int rowCount = getRowCount();
-        for(int i = 0; i < rowCount; i++)
-            max = std::max(getCellContent(i, col).length(), max);
-        return max;
-    });
-}
-
-void StdTable::copyEntrySlot()
-{
-    QAction* action = qobject_cast<QAction*>(sender());
-    if(!action)
-        return;
-    int col = action->objectName().toInt();
-    QString finalText = getCellContent(getInitialSelection(), col);
-    while(finalText.endsWith(" ")) finalText.chop(1);
-    Bridge::CopyToClipboard(finalText);
-}
-
-void StdTable::setupCopyMenu(QMenu* copyMenu)
-{
-    if(!getColumnCount())
-        return;
-    //Copy->Whole Line
-    QAction* mCopyLine = new QAction(tr("&Line"), copyMenu);
-    connect(mCopyLine, SIGNAL(triggered()), this, SLOT(copyLineSlot()));
-    copyMenu->addAction(mCopyLine);
-    //Copy->Cropped Table
-    QAction* mCopyTable = new QAction(tr("Cropped &Table"), copyMenu);
-    connect(mCopyTable, SIGNAL(triggered()), this, SLOT(copyTableSlot()));
-    copyMenu->addAction(mCopyTable);
-    //Copy->Full Table
-    QAction* mCopyTableResize = new QAction(tr("&Full Table"), copyMenu);
-    connect(mCopyTableResize, SIGNAL(triggered()), this, SLOT(copyTableResizeSlot()));
-    copyMenu->addAction(mCopyTableResize);
-    //Copy->Separator
-    copyMenu->addSeparator();
-    //Copy->ColName
-    for(int i = 0; i < getColumnCount(); i++)
-    {
-        if(!getCellContent(getInitialSelection(), i).length()) //skip empty cells
-            continue;
-        QString title = mCopyTitles.at(i);
-        if(!title.length()) //skip empty copy titles
-            continue;
-        QAction* mCopyAction = new QAction(title, copyMenu);
-        mCopyAction->setObjectName(QString::number(i));
-        connect(mCopyAction, SIGNAL(triggered()), this, SLOT(copyEntrySlot()));
-        copyMenu->addAction(mCopyAction);
-    }
-}
-
-void StdTable::setCopyMenuOnly(bool bSet, bool bDebugOnly)
-{
-    mCopyMenuOnly = bSet;
-    mCopyMenuDebugOnly = bDebugOnly;
-}
-
-void StdTable::contextMenuRequestedSlot(const QPoint & pos)
-{
-    if(!mCopyMenuOnly)
-    {
-        emit contextMenuSignal(pos);
-        return;
-    }
-    if(mCopyMenuDebugOnly && !DbgIsDebugging())
-        return;
-    QMenu wMenu(this);
-    QMenu wCopyMenu(tr("&Copy"), this);
-    setupCopyMenu(&wCopyMenu);
-    if(wCopyMenu.actions().length())
-    {
-        wMenu.addSeparator();
-        wMenu.addMenu(&wCopyMenu);
-        wMenu.exec(mapToGlobal(pos));
-    }
-}
-
-void StdTable::headerButtonPressedSlot(int col)
-{
-    if(!mIsColumnSortingAllowed)
-        return;
-    if(mSort.first != col) //first = column to sort
-    {
-        mSort.first = col;
-        mSort.second = false; //second = ascending/descending
-    }
-    else
-        mSort.second = !mSort.second;
-    reloadData();
-}
-
-void StdTable::reloadData()
-{
-    if(mSort.first != -1) //re-sort if the user wants to sort
-        qSort(mData.begin(), mData.end(), ColumnCompare(mSort.first, mSort.second));
-    AbstractTableView::reloadData();
 }

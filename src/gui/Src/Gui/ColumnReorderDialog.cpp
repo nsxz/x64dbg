@@ -1,5 +1,6 @@
 #include "ColumnReorderDialog.h"
 #include "ui_ColumnReorderDialog.h"
+#include <BasicView/AbstractTableView.h>
 #include <QMessageBox>
 
 ColumnReorderDialog::ColumnReorderDialog(AbstractTableView* parent) :
@@ -9,18 +10,18 @@ ColumnReorderDialog::ColumnReorderDialog(AbstractTableView* parent) :
 {
     ui->setupUi(this);
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
-    for(int j = 0; j < parent->getColumnCount(); j++)
+    for(duint j = 0; j < parent->getColumnCount(); j++)
     {
         int i = parent->mColumnOrder[j];
         if(parent->getColumnHidden(i))
         {
             ui->listAvailable->addItem(parent->getColTitle(i));
-            ui->listAvailable->item(ui->listAvailable->count() - 1)->setData(Qt::UserRole, QVariant(j));
+            ui->listAvailable->item(ui->listAvailable->count() - 1)->setData(Qt::UserRole, QVariant(i));
         }
         else
         {
             ui->listDisplayed->addItem(parent->getColTitle(i));
-            ui->listDisplayed->item(ui->listDisplayed->count() - 1)->setData(Qt::UserRole, QVariant(j));
+            ui->listDisplayed->item(ui->listDisplayed->count() - 1)->setData(Qt::UserRole, QVariant(i));
         }
     }
     if(ui->listAvailable->count() == 0)
@@ -45,6 +46,7 @@ void ColumnReorderDialog::on_okButton_clicked()
     if(ui->listDisplayed->count() == 0)
     {
         QMessageBox msg(QMessageBox::Warning, tr("Error"), tr("There isn't anything to display yet!"));
+        msg.setWindowIcon(DIcon("compile-error"));
         msg.exec();
         return;
     }
@@ -60,6 +62,7 @@ void ColumnReorderDialog::on_okButton_clicked()
         mParent->mColumnOrder[i] = col;
         mParent->setColumnHidden(col, true);
     }
+    mParent->reloadData();
     this->done(QDialog::Accepted);
 }
 

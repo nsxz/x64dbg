@@ -1,18 +1,13 @@
 #include "msgqueue.h"
 
 // Allocate a message stack
-MESSAGE_STACK* MsgAllocStack()
+MESSAGE_QUEUE* MsgAllocQueue()
 {
-    auto stack = new MESSAGE_STACK;
-
-    stack->WaitingCalls = 0;
-    stack->Destroy = false;
-
-    return stack;
+    return new MESSAGE_QUEUE();
 }
 
 // Free a message stack
-void MsgFreeStack(MESSAGE_STACK* Stack)
+void MsgFreeQueue(MESSAGE_QUEUE* Stack)
 {
     ASSERT_NONNULL(Stack);
 
@@ -27,11 +22,11 @@ void MsgFreeStack(MESSAGE_STACK* Stack)
     }
 
     // Delete allocated structure
-    delete Stack;
+    //delete Stack;
 }
 
 // Add a message to the stack
-bool MsgSend(MESSAGE_STACK* Stack, int Msg, duint Param1, duint Param2)
+bool MsgSend(MESSAGE_QUEUE* Stack, int Msg, duint Param1, duint Param2)
 {
     if(Stack->Destroy)
         return false;
@@ -42,28 +37,28 @@ bool MsgSend(MESSAGE_STACK* Stack, int Msg, duint Param1, duint Param2)
     newMessage.param2 = Param2;
 
     // Asynchronous send
-    asend(Stack->msgs, newMessage);
+    Stack->msgs.enqueue(newMessage);
     return true;
 }
 
 // Get a message from the stack (will return false when there are no messages)
-bool MsgGet(MESSAGE_STACK* Stack, MESSAGE* Msg)
+bool MsgGet(MESSAGE_QUEUE* Stack, MESSAGE* Msg)
 {
     if(Stack->Destroy)
         return false;
 
     // Don't increment the wait count because this does not wait
-    return try_receive(Stack->msgs, *Msg);
+    return Stack->msgs.try_dequeue(*Msg);
 }
 
 // Wait for a message on the specified stack
-void MsgWait(MESSAGE_STACK* Stack, MESSAGE* Msg)
+void MsgWait(MESSAGE_QUEUE* Stack, MESSAGE* Msg)
 {
     if(Stack->Destroy)
         return;
 
     // Increment/decrement wait count
     InterlockedIncrement((volatile long*)&Stack->WaitingCalls);
-    *Msg = Stack->msgs.dequeue();
+    Stack->msgs.wait_dequeue(*Msg);
     InterlockedDecrement((volatile long*)&Stack->WaitingCalls);
 }

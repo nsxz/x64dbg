@@ -1,5 +1,4 @@
-#ifndef VALIDATEEXPRESSIONTHREAD_H
-#define VALIDATEEXPRESSIONTHREAD_H
+#pragma once
 
 #include <QThread>
 #include <QMutex>
@@ -12,8 +11,8 @@ class ValidateExpressionThread : public QThread
 {
     Q_OBJECT
 public:
-    ValidateExpressionThread(QObject* parent = 0);
-    void start(QString initialValue = QString());
+    ValidateExpressionThread(QObject* parent = nullptr);
+    void start();
     void stop();
     void emitExpressionChanged(bool validExpression, bool validPointer, dsint value);
     void emitInstructionChanged(dsint sizeDifference, QString error);
@@ -24,6 +23,7 @@ signals:
 
 public slots:
     void textChanged(QString text);
+    void additionalStateChanged();
     void setOnExpressionChangedCallback(EXPRESSIONCHANGEDCB callback);
 
 private:
@@ -35,5 +35,3 @@ private:
 
     void run();
 };
-
-#endif // VALIDATEEXPRESSIONTHREAD_H

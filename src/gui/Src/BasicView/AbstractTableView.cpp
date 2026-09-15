@@ -1,57 +1,58 @@
 #include "AbstractTableView.h"
+#include <QAccessible>
 #include <QStyleOptionButton>
+#include <cinttypes>
 #include "Configuration.h"
-#include "ColumnReorderDialog.h"
+#include <Gui/ColumnReorderDialog.h>
+#include <Utils/CachedFontMetrics.h>
+#include "Bridge.h"
+#include <Utils/MethodInvoker.h>
+
+AbstractTableScrollBar::AbstractTableScrollBar(QScrollBar* scrollbar)
+{
+    setOrientation(scrollbar->orientation());
+    setParent(scrollbar->parentWidget());
+}
+
+bool AbstractTableScrollBar::event(QEvent* event)
+{
+    switch(event->type())
+    {
+    case QEvent::Enter:
+        QApplication::setOverrideCursor(Qt::ArrowCursor);
+        break;
+    case QEvent::Leave:
+        QApplication::restoreOverrideCursor();
+        break;
+    default:
+        break;
+    }
+    return QScrollBar::event(event);
+}
 
 AbstractTableView::AbstractTableView(QWidget* parent)
-    : QAbstractScrollArea(parent),
-      mFontMetrics(nullptr)
+    : QAbstractScrollArea(parent)
 {
-    // Class variable initialization
-    mTableOffset = 0;
-    mPrevTableOffset = mTableOffset + 1;
-    Header_t data;
-    data.isVisible = true;
-    data.height = 20;
-    data.activeButtonIndex = -1;
-    mHeader = data;
-
-    // Paint cell content only when debugger is running
-    setDrawDebugOnly(true);
-
-    mRowCount = 0;
-
-    mHeaderButtonSytle.setStyleSheet(" QPushButton {\n     background-color: rgb(192, 192, 192);\n     border-style: outset;\n     border-width: 2px;\n     border-color: rgb(128, 128, 128);\n }\n QPushButton:pressed {\n     background-color: rgb(192, 192, 192);\n     border-style: inset;\n }");
-
-    mNbrOfLineToPrint = 0;
-
-    memset(&mColResizeData, 0, sizeof(mColResizeData));
-
-    mGuiState = AbstractTableView::NoState;
-
-    mShouldReload = true;
-    mAllowPainting = true;
-
     // ScrollBar Init
     setVerticalScrollBar(new AbstractTableScrollBar(verticalScrollBar()));
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     memset(&mScrollBarAttributes, 0, sizeof(mScrollBarAttributes));
     horizontalScrollBar()->setRange(0, 0);
-    horizontalScrollBar()->setPageStep(650);
-    mMouseWheelScrollDelta = 4;
+    horizontalScrollBar()->setPageStep(650); // TODO: random value
     setMouseTracking(true);
 
     // Slots
     connect(verticalScrollBar(), SIGNAL(actionTriggered(int)), this, SLOT(vertSliderActionSlot(int)));
-    connect(Config(), SIGNAL(colorsUpdated()), this, SLOT(slot_updateColors()));
-    connect(Config(), SIGNAL(fontsUpdated()), this, SLOT(slot_updateFonts()));
-    connect(Config(), SIGNAL(shortcutsUpdated()), this, SLOT(slot_updateShortcuts()));
+    connect(Config(), SIGNAL(colorsUpdated()), this, SLOT(updateColorsSlot()));
+    connect(Config(), SIGNAL(fontsUpdated()), this, SLOT(updateFontsSlot()));
+    connect(Config(), SIGNAL(shortcutsUpdated()), this, SLOT(updateShortcutsSlot()));
+    connect(Bridge::getBridge(), SIGNAL(close()), this, SLOT(closeSlot()));
 
     // todo: try Qt::QueuedConnection to init
     Initialize();
 }
 
-AbstractTableView::~AbstractTableView()
+void AbstractTableView::closeSlot()
 {
     if(ConfigBool("Gui", "SaveColumnOrder"))
         saveColumnToConfig();
@@ -67,6 +68,9 @@ void AbstractTableView::Initialize()
     // of VTable changes
     //
     // Init all other updates once
+    accessibilitySelectedColumn = 0;
+    accessibilityPreviousSelectedRow = -1;
+    accessibilityPreviousSelectedColumn = -1;
     updateColors();
     updateFonts();
     updateShortcuts();
@@ -74,18 +78,28 @@ void AbstractTableView::Initialize()
 
 void AbstractTableView::updateColors()
 {
-    backgroundColor = ConfigColor("AbstractTableViewBackgroundColor");
-    textColor = ConfigColor("AbstractTableViewTextColor");
-    separatorColor = ConfigColor("AbstractTableViewSeparatorColor");
-    headerTextColor = ConfigColor("AbstractTableViewHeaderTextColor");
-    selectionColor = ConfigColor("AbstractTableViewSelectionColor");
+    mTextColor = ConfigColor("AbstractTableViewTextColor");
+    mBackgroundColor = ConfigColor("AbstractTableViewBackgroundColor");
+
+    mHeaderTextColor = ConfigColor("AbstractTableViewHeaderTextColor");
+    mHeaderBackgroundColor = ConfigColor("AbstractTableViewHeaderBackgroundColor");
+
+    mSelectionColor = ConfigColor("AbstractTableViewSelectionColor");
+    mSeparatorColor = ConfigColor("AbstractTableViewSeparatorColor");
 }
 
 void AbstractTableView::updateFonts()
 {
     setFont(ConfigFont("AbstractTableView"));
     invalidateCachedFont();
-    mHeader.height = QFontMetrics(font()).height() + 4;
+    mHeader.height = mFontMetrics->height() + 4;
+}
+
+QColor AbstractTableView::getCellColor(duint row, duint col)
+{
+    Q_UNUSED(row);
+    Q_UNUSED(col);
+    return mTextColor;
 }
 
 void AbstractTableView::invalidateCachedFont()
@@ -94,31 +108,36 @@ void AbstractTableView::invalidateCachedFont()
     mFontMetrics = new CachedFontMetrics(this, font());
 }
 
-void AbstractTableView::updateShortcuts()
-{
-    for(const auto & actionShortcut : actionShortcutPairs)
-        actionShortcut.action->setShortcut(ConfigShortcut(actionShortcut.shortcut));
-}
-
-void AbstractTableView::slot_updateColors()
+void AbstractTableView::updateColorsSlot()
 {
     updateColors();
 }
 
-void AbstractTableView::slot_updateFonts()
+void AbstractTableView::updateFontsSlot()
 {
+    auto oldCharWidth = getCharWidth();
     updateFonts();
+    auto newCharWidth = getCharWidth();
+
+    // Scale the column widths to the new font
+    for(duint col = 0; col < getColumnCount(); col++)
+    {
+        auto width = getColumnWidth(col);
+        auto charCount = width / oldCharWidth;
+        auto padding = width % oldCharWidth;
+        setColumnWidth(col, charCount * newCharWidth + padding);
+    }
 }
 
-void AbstractTableView::slot_updateShortcuts()
+void AbstractTableView::updateShortcutsSlot()
 {
     updateShortcuts();
 }
 
 void AbstractTableView::loadColumnFromConfig(const QString & viewName)
 {
-    int columnCount = getColumnCount();
-    for(int i = 0; i < columnCount; i++)
+    duint columnCount = getColumnCount();
+    for(duint i = 0; i < columnCount; i++)
     {
         duint width = ConfigUint("Gui", QString("%1ColumnWidth%2").arg(viewName).arg(i).toUtf8().constData());
         duint hidden = ConfigUint("Gui", QString("%1ColumnHidden%2").arg(viewName).arg(i).toUtf8().constData());
@@ -131,6 +150,7 @@ void AbstractTableView::loadColumnFromConfig(const QString & viewName)
             mColumnOrder[i] = order - 1;
     }
     mViewName = viewName;
+    accessibilityTableModelChanged();
 }
 
 void AbstractTableView::saveColumnToConfig()
@@ -157,6 +177,14 @@ void AbstractTableView::setupColumnConfigDefaultValue(QMap<QString, duint> & map
     }
 }
 
+void AbstractTableView::editColumnDialog()
+{
+    delete mReorderDialog;
+    mReorderDialog = new ColumnReorderDialog(this);
+    mReorderDialog->setWindowTitle(tr("Edit columns"));
+    mReorderDialog->open();
+}
+
 /************************************************************************************
                             Painting Stuff
 ************************************************************************************/
@@ -171,105 +199,119 @@ void AbstractTableView::paintEvent(QPaintEvent* event)
 {
     if(!mAllowPainting)
         return;
-    if(getColumnCount()) //make sure the last column is never smaller than the window
-    {
-        int totalWidth = 0;
-        int lastWidth = totalWidth;
-        int last = 0;
-        for(int i = 0; i < getColumnCount(); i++)
-        {
-            if(getColumnHidden(mColumnOrder[i]))
-                continue;
-            last = mColumnOrder[i];
-            lastWidth = getColumnWidth(last);
-            totalWidth += lastWidth;
-        }
-        lastWidth = totalWidth - lastWidth;
-        int width = this->viewport()->width();
-        lastWidth = width > lastWidth ? width - lastWidth : 0;
-        if(totalWidth < width)
-            setColumnWidth(last, lastWidth);
-        else
-            setColumnWidth(last, getColumnWidth(last));
-    }
 
     Q_UNUSED(event);
-    QPainter wPainter(this->viewport());
-    int wViewableRowsCount = getViewableRowsCount();
+    QPainter painter(this->viewport());
+    painter.setFont(font());
+    painter.setLayoutDirection(Qt::LayoutDirectionAuto);
+    auto viewableRowsCount = getViewableRowsCount();
 
     int scrollValue = -horizontalScrollBar()->value();
 
-    int x = scrollValue;
-    int y = 0;
-
     // Reload data if needed
-    if(mPrevTableOffset != mTableOffset || mShouldReload == true)
+    if(mPrevTableOffset != mTableOffset || mShouldReload)
     {
+        updateScrollBarRange(getRowCount());
         prepareData();
         mPrevTableOffset = mTableOffset;
         mShouldReload = false;
     }
 
+    // Notify only after prepareData() has made the accessible model coherent.
+    if(accessibilityModelChangePending)
+    {
+        accessibilityModelChangePending = false;
+        accessibilityNotifyTableModelChanged();
+    }
+
+    // TODO: report if mTableOffset is out of view
+
     // Paints background
-    wPainter.fillRect(wPainter.viewport(), QBrush(backgroundColor));
+    if(mBackgroundColor.alpha() == 255) // The secret code to allow the user to set a background image in style.css
+        painter.fillRect(painter.viewport(), QBrush(mBackgroundColor));
 
     // Paints header
-    if(mHeader.isVisible == true)
+    if(mHeader.isVisible)
     {
-        for(int j = 0; j < getColumnCount(); j++)
+        int x = scrollValue;
+        int y = 0;
+
+        QPen textPen(mHeaderTextColor);
+        QPen separatorPen(mSeparatorColor, 2);
+        QBrush backgroundBrush(mHeaderBackgroundColor);
+
+        for(duint j = 0; j < getColumnCount(); j++)
         {
             int i = mColumnOrder[j];
             if(getColumnHidden(i))
                 continue;
             int width = getColumnWidth(i);
-            QStyleOptionButton wOpt;
-            if((mColumnList[i].header.isPressed == true) && (mColumnList[i].header.isMouseOver == true)
-                    || (mGuiState == AbstractTableView::HeaderButtonReordering && mColumnOrder[mHoveredColumnDisplayIndex] == i))
-                wOpt.state = QStyle::State_Sunken;
+            int height = getHeaderHeight();
+
+            const auto isPressed = (mColumnList[i].header.isPressed && mColumnList[i].header.isMouseOver)
+                                   || (mGuiState == AbstractTableView::HeaderButtonReordering && mColumnOrder[mHoveredColumnDisplayIndex] == i);
+
+            if(isPressed)
+            {
+                painter.fillRect(x, y, width, height, QBrush(mSeparatorColor));
+            }
             else
-                wOpt.state = QStyle::State_Enabled;
+            {
+                painter.fillRect(x, y, width, height, backgroundBrush);
+            }
 
-            wOpt.rect = QRect(x, y, width, getHeaderHeight());
+            painter.setPen(textPen);
+            painter.drawText(QRect(x + 4, y, width - 8, height), Qt::AlignVCenter | Qt::AlignLeft, mColumnList[i].title);
 
-            mHeaderButtonSytle.style()->drawControl(QStyle::CE_PushButton, &wOpt, &wPainter, &mHeaderButtonSytle);
+            if(isPressed)
+            {
+                painter.setPen(QPen(mTextColor, 2));
+            }
+            else
+            {
+                painter.setPen(separatorPen);
+            }
 
-            wPainter.setPen(headerTextColor);
-            wPainter.drawText(QRect(x + 4, y, width - 8, getHeaderHeight()), Qt::AlignVCenter | Qt::AlignLeft, mColumnList[i].title);
+            painter.drawLine(x, y + height - separatorPen.width() + 1, x + width - separatorPen.width(), y + height - separatorPen.width() + 1);
+            painter.drawLine(x + width - separatorPen.width() + 1, y, x + width - separatorPen.width() + 1, y + height - separatorPen.width());
 
             x += width;
         }
     }
 
-    x = scrollValue;
-    y = getHeaderHeight();
+    int x = scrollValue;
+    int y = getHeaderHeight();
 
     // Iterate over all columns and cells
-    for(int k = 0; k < getColumnCount(); k++)
+    for(duint k = 0; k < getColumnCount(); k++)
     {
         int j = mColumnOrder[k];
         if(getColumnHidden(j))
             continue;
-        for(int i = 0; i < wViewableRowsCount; i++)
+        for(duint i = 0; i < viewableRowsCount; i++)
         {
-            //  Paints cell contents
+            // Paints cell contents
             if(i < mNbrOfLineToPrint)
             {
                 // Don't draw cells if the flag is set, and no process is running
                 if(!mDrawDebugOnly || DbgIsDebugging())
                 {
-                    QString wStr = paintContent(&wPainter, mTableOffset, i, j, x, y, getColumnWidth(j), getRowHeight());
+                    QString str = paintContent(&painter, mTableOffset + i, j, x, y, getColumnWidth(j), getRowHeight());
 
-                    if(wStr.length())
+                    if(str.length())
                     {
-                        wPainter.setPen(textColor);
-                        wPainter.drawText(QRect(x + 4, y, getColumnWidth(j) - 4, getRowHeight()), Qt::AlignVCenter | Qt::AlignLeft, wStr);
+                        painter.setPen(getCellColor(mTableOffset + i, j));
+                        painter.drawText(QRectF(x + 4, y, getColumnWidth(j) - 5, getRowHeight()), Qt::AlignVCenter | Qt::AlignLeft, str);
                     }
                 }
             }
 
-            // Paints cell right borders
-            wPainter.setPen(separatorColor);
-            wPainter.drawLine(x + getColumnWidth(j) - 1, y, x + getColumnWidth(j) - 1, y + getRowHeight() - 1);
+            if(getColumnCount() > 1)
+            {
+                // Paints cell right borders
+                painter.setPen(mSeparatorColor);
+                painter.drawLine(x + getColumnWidth(j) - 1, y, x + getColumnWidth(j) - 1, y + getRowHeight() - 1);
+            }
 
             // Update y for the next iteration
             y += getRowHeight();
@@ -278,9 +320,7 @@ void AbstractTableView::paintEvent(QPaintEvent* event)
         y = getHeaderHeight();
         x += getColumnWidth(j);
     }
-    //emit repainted();
 }
-
 
 /************************************************************************************
                             Mouse Management
@@ -296,12 +336,15 @@ void AbstractTableView::paintEvent(QPaintEvent* event)
  */
 void AbstractTableView::mouseMoveEvent(QMouseEvent* event)
 {
-    int wColIndex = getColumnIndexFromX(event->x());
-    int wStartPos = getColumnPosition(wColIndex); // Position X of the start of column
-    int wEndPos = getColumnPosition(wColIndex) + getColumnWidth(wColIndex); // Position X of the end of column
-    bool wHandle = ((wColIndex != 0) && (event->x() >= wStartPos) && (event->x() <= (wStartPos + 2))) || ((event->x() <= wEndPos) && (event->x() >= (wEndPos - 2)));
-    if(wColIndex == getColumnCount() - 1 && event->x() > viewport()->width()) //last column
-        wHandle = false;
+    if(getColumnCount() <= 1)
+        return;
+    auto colIndex = getColumnIndexFromX(event->x());
+    auto displayIndex = getColumnDisplayIndexFromX(event->x());
+    int startPos = getColumnPosition(displayIndex); // Position X of the start of column
+    int endPos = startPos + getColumnWidth(colIndex); // Position X of the end of column
+    bool onHandle = ((colIndex != 0) && (event->x() >= startPos) && (event->x() <= (startPos + 2))) || ((event->x() <= endPos) && (event->x() >= (endPos - 2)));
+    if(colIndex == getColumnCount() - 1 && event->x() > viewport()->width()) //last column
+        onHandle = false;
 
     switch(mGuiState)
     {
@@ -309,24 +352,20 @@ void AbstractTableView::mouseMoveEvent(QMouseEvent* event)
     {
         if(event->buttons() == Qt::NoButton)
         {
-            bool wHasCursor = cursor().shape() == Qt::SplitHCursor ? true : false;
+            bool hasCursor = cursor().shape() == Qt::SplitHCursor ? true : false;
 
-            if((wHandle == true) && (wHasCursor == false))
+            if(onHandle && !hasCursor)
             {
                 setCursor(Qt::SplitHCursor);
                 mColResizeData.splitHandle = true;
                 mGuiState = AbstractTableView::ReadyToResize;
             }
-            if((wHandle == false) && (wHasCursor == true))
+            else if(!onHandle && hasCursor)
             {
                 unsetCursor();
                 mColResizeData.splitHandle = false;
                 mGuiState = AbstractTableView::NoState;
             }
-        }
-        else
-        {
-            QWidget::mouseMoveEvent(event);
         }
     }
     break;
@@ -335,7 +374,7 @@ void AbstractTableView::mouseMoveEvent(QMouseEvent* event)
     {
         if(event->buttons() == Qt::NoButton)
         {
-            if((wHandle == false) && (mGuiState == AbstractTableView::ReadyToResize))
+            if(!onHandle && mGuiState == AbstractTableView::ReadyToResize)
             {
                 unsetCursor();
                 mColResizeData.splitHandle = false;
@@ -348,11 +387,11 @@ void AbstractTableView::mouseMoveEvent(QMouseEvent* event)
     case AbstractTableView::ResizeColumnState:
     {
         int delta = event->x() - mColResizeData.lastPosX;
-        bool bCanResize = (getColumnWidth(mColResizeData.index) + delta) >= 20;
+        bool bCanResize = (getColumnWidth(mColumnOrder[mColResizeData.index]) + delta) >= mMinColumnWidth;
         if(bCanResize)
         {
-            int wNewSize = getColumnWidth(mColResizeData.index) + delta;
-            setColumnWidth(mColResizeData.index, wNewSize);
+            int newSize = getColumnWidth(mColumnOrder[mColResizeData.index]) + delta;
+            setColumnWidth(mColumnOrder[mColResizeData.index], newSize);
             mColResizeData.lastPosX = event->x();
             updateViewport();
         }
@@ -361,9 +400,9 @@ void AbstractTableView::mouseMoveEvent(QMouseEvent* event)
 
     case AbstractTableView::HeaderButtonPressed:
     {
-        int wColIndex = getColumnIndexFromX(event->x());
+        auto colIndex = getColumnIndexFromX(event->x());
 
-        if(wColIndex == mHeader.activeButtonIndex)
+        if(colIndex == mHeader.activeButtonIndex)
         {
             mColumnList[mHeader.activeButtonIndex].header.isMouseOver = (event->y() <= getHeaderHeight()) && (event->y() >= 0);
             break;
@@ -384,8 +423,9 @@ void AbstractTableView::mouseMoveEvent(QMouseEvent* event)
     default:
         break;
     }
-}
 
+    QAbstractScrollArea::mouseMoveEvent(event);
+}
 
 /**
  * @brief       This method has been reimplemented. It manages the following actions:
@@ -400,20 +440,21 @@ void AbstractTableView::mousePressEvent(QMouseEvent* event)
 {
     if(((event->buttons() & Qt::LeftButton) != 0) && ((event->buttons() & Qt::RightButton) == 0))
     {
-        if(mColResizeData.splitHandle == true)
+        if(mColResizeData.splitHandle)
         {
-            int wColIndex = getColumnDisplayIndexFromX(event->x());
-            int wStartPos = getColumnPosition(mColumnOrder[wColIndex]); // Position X of the start of column
+            int colIndex = getColumnDisplayIndexFromX(event->x());
+            int displayIndex = getColumnDisplayIndexFromX(event->x());
+            int startPos = getColumnPosition(displayIndex); // Position X of the start of column
 
             mGuiState = AbstractTableView::ResizeColumnState;
 
-            if(event->x() <= (wStartPos + 2))
+            if(event->x() <= (startPos + 2))
             {
-                mColResizeData.index = wColIndex - 1;
+                mColResizeData.index = colIndex - 1;
             }
             else
             {
-                mColResizeData.index = wColIndex;
+                mColResizeData.index = colIndex;
             }
 
             mColResizeData.lastPosX = event->x();
@@ -422,28 +463,29 @@ void AbstractTableView::mousePressEvent(QMouseEvent* event)
         {
             mReorderStartX = event->x();
 
-            int wColIndex = getColumnIndexFromX(event->x());
+            auto colIndex = getColumnIndexFromX(event->x());
+            if(mColumnList[colIndex].header.isClickable)
+            {
+                //qDebug() << "Button " << colIndex << "has been pressed.";
+                emit headerButtonPressed(colIndex);
 
-            //qDebug() << "Button " << wColIndex << "has been pressed.";
-            emit headerButtonPressed(wColIndex);
+                mColumnList[colIndex].header.isPressed = true;
+                mColumnList[colIndex].header.isMouseOver = true;
 
-            mColumnList[wColIndex].header.isPressed = true;
-            mColumnList[wColIndex].header.isMouseOver = true;
+                mHeader.activeButtonIndex = colIndex;
 
-            mHeader.activeButtonIndex = wColIndex;
+                mGuiState = AbstractTableView::HeaderButtonPressed;
 
-            mGuiState = AbstractTableView::HeaderButtonPressed;
-
-            updateViewport();
+                updateViewport();
+            }
         }
+        accessibilityMousePressSetColumn(event);
     }
     else //right/middle click
     {
         if(event->y() < getHeaderHeight())
         {
-            ColumnReorderDialog reorderDialog(this);
-            reorderDialog.setWindowTitle(tr("Edit columns"));
-            reorderDialog.exec();
+            editColumnDialog();
             event->accept();
         }
     }
@@ -470,30 +512,28 @@ void AbstractTableView::mouseReleaseEvent(QMouseEvent* event)
         }
         else if(mGuiState == AbstractTableView::HeaderButtonPressed)
         {
-            if(mColumnList[mHeader.activeButtonIndex].header.isMouseOver == true)
+            if(mColumnList[mHeader.activeButtonIndex].header.isMouseOver)
             {
-                //qDebug() << "Button " << mHeader.activeButtonIndex << "has been released.";
                 emit headerButtonReleased(mHeader.activeButtonIndex);
             }
             mGuiState = AbstractTableView::NoState;
         }
         else if(mGuiState == AbstractTableView::HeaderButtonReordering)
         {
-            int temp;
-            int wReorderFrom = getColumnDisplayIndexFromX(mReorderStartX);
-            int wReorderTo = getColumnDisplayIndexFromX(event->x());
-            temp = mColumnOrder[wReorderFrom];
-            mColumnOrder[wReorderFrom] = mColumnOrder[wReorderTo];
-            mColumnOrder[wReorderTo] = temp;
+            int reorderFrom = getColumnDisplayIndexFromX(mReorderStartX);
+            int reorderTo = getColumnDisplayIndexFromX(event->x());
+            std::swap(mColumnOrder[reorderFrom], mColumnOrder[reorderTo]);
             mGuiState = AbstractTableView::NoState;
+            updateLastColumnWidth();
+            accessibilityTableModelChanged();
         }
         else
         {
-            QWidget::mouseReleaseEvent(event);
+            return;
         }
 
         // Release all buttons
-        for(int i = 0; i < getColumnCount(); i++)
+        for(duint i = 0; i < getColumnCount(); i++)
         {
             mColumnList[i].header.isPressed = false;
         }
@@ -506,9 +546,7 @@ void AbstractTableView::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if(event->y() < getHeaderHeight())
     {
-        ColumnReorderDialog reorderDialog(this);
-        reorderDialog.setWindowTitle(tr("Edit columns"));
-        reorderDialog.exec();
+        editColumnDialog();
         event->accept();
     }
 }
@@ -521,20 +559,124 @@ void AbstractTableView::mouseDoubleClickEvent(QMouseEvent* event)
  *
  * @return      Nothing.
  */
+
 void AbstractTableView::wheelEvent(QWheelEvent* event)
 {
-    int numDegrees = event->delta() / 8;
-    int numSteps = numDegrees / 15;
+    const auto lineAngleTick = 120 / QApplication::wheelScrollLines();
+    mAngleScrollDelta += event->angleDelta();
 
-    if(numSteps > 0)
+    auto linesY = mAngleScrollDelta.y() / lineAngleTick;
+    if(linesY != 0)
     {
-        for(int i = 0; i < mMouseWheelScrollDelta * numSteps; i++)
-            verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepSub);
+        mAngleScrollDelta = QPoint(0, mAngleScrollDelta.y() % lineAngleTick);
     }
-    else
+
+    auto linesX = mAngleScrollDelta.x() / lineAngleTick;
+    if(linesX != 0)
     {
-        for(int i = 0; i < mMouseWheelScrollDelta * numSteps * -1; i++)
-            verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+        mAngleScrollDelta = QPoint(mAngleScrollDelta.x() % lineAngleTick, 0);
+    }
+
+    if(event->modifiers() == Qt::NoModifier)
+    {
+#ifdef Q_OS_DARWIN
+        const auto enableTouchPad = true;
+#else
+        // For now this functionality is only enabled on macOS, because the Qt::ScrollBegin phase
+        // is only available there. Implementing this on another OS would require a timer to determine
+        // when the user stops scrolling.
+        const auto enableTouchPad = false;
+#endif // Q_OS_DARWIN
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+        if(enableTouchPad && event->device()->type() == QInputDevice::DeviceType::TouchPad)
+#else
+        if(enableTouchPad && event->source() == Qt::MouseEventSynthesizedBySystem)
+#endif // QT_VERSION
+        {
+            QPoint pixelDelta = event->pixelDelta();
+
+            // When a touchpad is used the scroll events are pixel-based (vs mouse wheels which are angle-based).
+            // The scroll direction is determined with a getRowHeight threshold and after that the direction is
+            // locked. Without doing this you get weird diagonal scrolling and a bad user experience.
+            if(event->phase() == Qt::ScrollBegin)
+            {
+                mPixelScrollDelta = pixelDelta;
+                mPixelScrollDirection = ScrollUnknown;
+            }
+            else
+            {
+                mPixelScrollDelta += pixelDelta;
+            }
+
+            auto deltaY = mPixelScrollDelta.y();
+            const auto tickY = getRowHeight();
+            auto stepsY = deltaY / tickY;
+            if(stepsY != 0 && mPixelScrollDirection != ScrollHorizontal)
+            {
+                mPixelScrollDirection = ScrollVertical;
+                mPixelScrollDelta = QPoint(0, deltaY % tickY);
+                if(stepsY > 0)
+                {
+                    for(int i = 0; i < stepsY; i++)
+                        verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepSub);
+                }
+                else
+                {
+                    for(int i = 0; i < -stepsY; i++)
+                        verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+                }
+            }
+
+            auto deltaX = mPixelScrollDelta.x();
+            const auto tickX = getRowHeight();
+            if(mPixelScrollDirection == ScrollUnknown && (deltaX / tickX) != 0)
+            {
+                mPixelScrollDirection = ScrollHorizontal;
+            }
+
+            if(mPixelScrollDirection == ScrollHorizontal)
+            {
+                if(deltaX > 0)
+                {
+                    for(int i = 0; i < deltaX; i++)
+                        horizontalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepSub);
+                }
+                else
+                {
+                    for(int i = 0; i < -deltaX; i++)
+                        horizontalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+                }
+                mPixelScrollDelta = QPoint(0, 0);
+            }
+        }
+        else
+        {
+            if(linesY > 0)
+            {
+                for(int i = 0; i < linesY; i++)
+                    verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepSub);
+            }
+            else if(linesY < 0)
+            {
+                for(int i = 0; i < -linesY; i++)
+                    verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+            }
+            else if(linesX > 0)
+            {
+                for(int i = 0; i < linesX * 20; i++)
+                    horizontalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepSub);
+            }
+            else if(linesX < 0)
+            {
+                for(int i = 0; i < -linesX * 20; i++)
+                    horizontalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+            }
+        }
+    }
+    else if(event->modifiers() == Qt::ControlModifier) // Zoom
+    {
+        Config()->zoomFont("AbstractTableView", event);
     }
 }
 
@@ -548,14 +690,19 @@ void AbstractTableView::wheelEvent(QWheelEvent* event)
  */
 void AbstractTableView::resizeEvent(QResizeEvent* event)
 {
+    if(event->size().width() != event->oldSize().width())
+    {
+        updateLastColumnWidth();
+    }
+
     if(event->size().height() != event->oldSize().height())
     {
-        updateScrollBarRange(getRowCount());
+        emit viewableRowsChanged(getViewableRowsCount());
         mShouldReload = true;
+        accessibilityTableModelChanged();
     }
-    QWidget::resizeEvent(event);
+    QAbstractScrollArea::resizeEvent(event);
 }
-
 
 /************************************************************************************
                             Keyboard Management
@@ -570,26 +717,55 @@ void AbstractTableView::resizeEvent(QResizeEvent* event)
  */
 void AbstractTableView::keyPressEvent(QKeyEvent* event)
 {
-    int wKey = event->key();
+    auto key = event->key();
+    if(event->modifiers() != Qt::NoModifier && event->modifiers() != Qt::KeypadModifier)
+        return QAbstractScrollArea::keyPressEvent(event);
 
-    if(wKey == Qt::Key_Up)
+    if(key == Qt::Key_Up)
     {
         verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepSub);
     }
-    else if(wKey == Qt::Key_Down)
+    else if(key == Qt::Key_Down)
     {
         verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
     }
-    else if(wKey == Qt::Key_PageUp)
+    else if(key == Qt::Key_PageUp)
     {
         verticalScrollBar()->triggerAction(QAbstractSlider::SliderPageStepSub);
     }
-    else if(wKey == Qt::Key_PageDown)
+    else if(key == Qt::Key_PageDown)
     {
         verticalScrollBar()->triggerAction(QAbstractSlider::SliderPageStepAdd);
     }
-    else if(wKey == Qt::Key_Return || wKey == Qt::Key_Enter) //user pressed enter
+    else if(key == Qt::Key_Return || key == Qt::Key_Enter) //user pressed enter
+    {
         emit enterPressedSignal();
+    }
+    else
+    {
+        if(QAccessible::isActive())
+        {
+            QAccessibleInterface* iface = QAccessible::queryAccessibleInterface(this);
+            if(iface)
+            {
+                QAccessibleTableInterface* tface = (QAccessibleTableInterface*)iface->interface_cast(QAccessible::TableInterface);
+                if(tface)
+                {
+                    if(key == Qt::Key_Left && accessibilitySelectedColumn > 0)
+                    {
+                        accessibilitySelectedColumn--;
+                        accessibilitySelectionChanged();
+                    }
+                    else if(key == Qt::Key_Right && accessibilitySelectedColumn < tface->columnCount() - 1)
+                    {
+                        accessibilitySelectedColumn++;
+                        accessibilitySelectionChanged();
+                    }
+                }
+            }
+        }
+        QAbstractScrollArea::keyPressEvent(event);
+    }
 }
 
 /************************************************************************************
@@ -604,13 +780,12 @@ void AbstractTableView::keyPressEvent(QKeyEvent* event)
  */
 void AbstractTableView::vertSliderActionSlot(int action)
 {
-    dsint wDelta = 0;
-    int wSliderPos = verticalScrollBar()->sliderPosition();
-    int wNewScrollBarValue;
+    dsint delta = 0;
+    int sliderPos = verticalScrollBar()->sliderPosition();
 
     // Bounding
-    wSliderPos = wSliderPos > verticalScrollBar()->maximum() ? verticalScrollBar()->maximum() : wSliderPos;
-    wSliderPos = wSliderPos < 0 ? 0 : wSliderPos;
+    sliderPos = sliderPos > verticalScrollBar()->maximum() ? verticalScrollBar()->maximum() : sliderPos;
+    sliderPos = sliderPos < 0 ? 0 : sliderPos;
 
     // Determine the delta
     switch(action)
@@ -618,76 +793,72 @@ void AbstractTableView::vertSliderActionSlot(int action)
     case QAbstractSlider::SliderNoAction:
         break;
     case QAbstractSlider::SliderSingleStepAdd:
-        wDelta = 1;
+        delta = 1;
         break;
     case QAbstractSlider::SliderSingleStepSub:
-        wDelta = -1;
+        delta = -1;
         break;
     case QAbstractSlider::SliderPageStepAdd:
-        wDelta = 30;
+        delta = 30;
         break;
     case QAbstractSlider::SliderPageStepSub:
-        wDelta = -30;
+        delta = -30;
         break;
     case QAbstractSlider::SliderToMinimum:
     case QAbstractSlider::SliderToMaximum:
     case QAbstractSlider::SliderMove:
-#ifdef _WIN64
-        wDelta = scaleFromScrollBarRangeToUint64(wSliderPos) - mTableOffset;
-#else
-        wDelta = wSliderPos - mTableOffset;
-#endif
+        delta = scaleFromScrollBarRangeToUint64(sliderPos) - mTableOffset;
         break;
     default:
         break;
     }
 
+    // TODO: negative?
     // Call the hook (Usefull for disassembly)
-    mTableOffset = sliderMovedHook(action, mTableOffset, wDelta);
+    const duint previousTableOffset = mTableOffset;
+    mTableOffset = sliderMovedHook((QScrollBar::SliderAction)action, mTableOffset, delta);
+    if(mTableOffset != previousTableOffset)
+        accessibilityTableModelChanged();
 
     //this emit causes massive lag in the GUI
     //emit tableOffsetChanged(mTableOffset);
 
     // Scale the new table offset to the 32bits scrollbar range
-#ifdef _WIN64
-    wNewScrollBarValue = scaleFromUint64ToScrollBarRange(mTableOffset);
-#else
-    wNewScrollBarValue = mTableOffset;
-#endif
+    auto newScrollBarValue = scaleFromUint64ToScrollBarRange(mTableOffset);
 
     //this emit causes massive lag in the GUI
     //emit repainted();
 
     // Update scrollbar attributes
-    verticalScrollBar()->setValue(wNewScrollBarValue);
-    verticalScrollBar()->setSliderPosition(wNewScrollBarValue);
+    verticalScrollBar()->setValue(newScrollBarValue);
+    verticalScrollBar()->setSliderPosition(newScrollBarValue);
 }
-
 
 /**
  * @brief       This virtual method is called at the end of the vertSliderActionSlot(...) method.
  *              It allows changing the table offset according to the action type, the old table offset
  *              and delta between the old and the new table offset.
  *
- * @param[in]   type      Type of action (Refer to the QAbstractSlider::SliderAction enum)
- * @param[in]   value     Old table offset
- * @param[in]   delta     Scrollbar value delta compared to the previous state
+ * @param[in]   action              Type of action (Refer to the QAbstractSlider::SliderAction enum)
+ * @param[in]   prevTableOffset     Previous table offset
+ * @param[in]   delta               Scrollbar value delta compared to the previous state
  *
  * @return      Return the value of the new table offset.
  */
-dsint AbstractTableView::sliderMovedHook(int type, dsint value, dsint delta)
+duint AbstractTableView::sliderMovedHook(QScrollBar::SliderAction action, duint prevTableOffset, dsint delta)
 {
-    Q_UNUSED(type);
-    dsint wValue = value + delta;
-    dsint wMax = getRowCount() - getViewableRowsCount() + 1;
+    Q_UNUSED(action);
+
+    // TODO: fix this signed/unsigned logic
+    dsint value = prevTableOffset + delta;
+    dsint maxTableOffset = getMaxTableOffset();
 
     // Bounding
-    wValue = wValue > wMax ? wMax : wValue;
-    wValue = wValue < 0 ? 0 : wValue;
+    value = value > maxTableOffset ? maxTableOffset : value;
+    value = value < 0 ? 0 : value;
 
-    return wValue;
+    return value;
 }
-
 
 /**
  * @brief       This method scale the given 64bits integer to the scrollbar range (32bits).
@@ -696,26 +867,33 @@ dsint AbstractTableView::sliderMovedHook(int type, dsint value, dsint delta)
  *
  * @return      32bits integer.
  */
-#ifdef _WIN64
-int AbstractTableView::scaleFromUint64ToScrollBarRange(dsint value)
+int AbstractTableView::scaleFromUint64ToScrollBarRange(duint value)
 {
-    if(mScrollBarAttributes.is64 == true)
+    if(mScrollBarAttributes.is64)
     {
-        dsint wValue = ((dsint)value) >> mScrollBarAttributes.rightShiftCount;
-        dsint wValueMax = ((dsint)getRowCount() - 1) >> mScrollBarAttributes.rightShiftCount;
+        // TODO: this needs to be rewritten
+        value = ((dsint)value) >> mScrollBarAttributes.rightShiftCount;
+        dsint valueMax = ((dsint)getRowCount() - 1) >> mScrollBarAttributes.rightShiftCount;
 
         if(value == ((dsint)getRowCount() - 1))
-            return (int)(verticalScrollBar()->maximum());
+        {
+            return verticalScrollBar()->maximum();
+        }
         else
-            return (int)((dsint)((dsint)verticalScrollBar()->maximum() * (dsint)wValue) / (dsint)wValueMax);
+        {
+            if(valueMax == 0)
+            {
+                printf("valueMax: %" PRId64 ", value: %" PRIu64 ", rightShiftCount: %d\n", valueMax, value, mScrollBarAttributes.rightShiftCount);
+            }
+            // TODO: division by zero
+            return (int)((dsint)((dsint)verticalScrollBar()->maximum() * (dsint)value) / (dsint)valueMax);
+        }
     }
     else
     {
         return (int)value;
     }
 }
-#endif
-
 
 /**
  * @brief       This method scale the given 32bits integer to the table range (64bits).
@@ -724,25 +902,22 @@ int AbstractTableView::scaleFromUint64ToScrollBarRange(dsint value)
  *
  * @return      64bits integer.
  */
-#ifdef _WIN64
-dsint AbstractTableView::scaleFromScrollBarRangeToUint64(int value)
+duint AbstractTableView::scaleFromScrollBarRangeToUint64(int value)
 {
-    if(mScrollBarAttributes.is64 == true)
+    if(mScrollBarAttributes.is64)
     {
-        dsint wValueMax = ((dsint)getRowCount() - 1) >> mScrollBarAttributes.rightShiftCount;
+        dsint valueMax = ((dsint)getRowCount() - 1) >> mScrollBarAttributes.rightShiftCount;
 
         if(value == (int)0x7FFFFFFF)
             return (dsint)(getRowCount() - 1);
         else
-            return (dsint)(((dsint)((dsint)wValueMax * (dsint)value) / (dsint)0x7FFFFFFF) << mScrollBarAttributes.rightShiftCount);
+            return (dsint)(((dsint)((dsint)valueMax * (dsint)value) / (dsint)0x7FFFFFFF) << mScrollBarAttributes.rightShiftCount);
     }
     else
     {
         return (dsint)value;
     }
 }
-#endif
-
 
 /**
  * @brief       This method updates the vertical scrollbar range and pre-computes some attributes for the 32<->64bits conversion methods.
@@ -751,47 +926,50 @@ dsint AbstractTableView::scaleFromScrollBarRangeToUint64(int value)
  *
  * @return      none.
  */
-void AbstractTableView::updateScrollBarRange(dsint range)
+void AbstractTableView::updateScrollBarRange(duint range)
 {
-    dsint wMax = range - getViewableRowsCount() + 1;
+    int rangeMin = 0;
+    int rangeMax = 0;
 
-    if(wMax > 0)
+    auto viewableRows = getViewableRowsCount();
+    if(range > viewableRows)
     {
-#ifdef _WIN64
-        if((duint)wMax < (duint)0x0000000080000000)
+        auto maxTableOffset = range - viewableRows + 1; // TODO: why +1?
+        if(maxTableOffset < (duint)INT_MAX + 1)
         {
             mScrollBarAttributes.is64 = false;
             mScrollBarAttributes.rightShiftCount = 0;
-            verticalScrollBar()->setRange(0, wMax);
+
+            rangeMin = 0;
+            rangeMax = maxTableOffset;
         }
         else
         {
-            duint wMask = 0x8000000000000000;
-            int wLeadingZeroCount;
-
             // Count leading zeros
-            for(wLeadingZeroCount = 0; wLeadingZeroCount < 64; wLeadingZeroCount++)
+            int leadingZeroCount = 0;
+            for(uint64_t mask = 0x8000000000000000; mask != 0; mask >>= 1)
             {
-                if((duint)wMax < wMask)
+                if((maxTableOffset & mask) != 0)
                 {
-                    wMask = wMask >> 1;
+                    break;
                 }
                 else
                 {
-                    break;
+                    leadingZeroCount++;
                 }
             }
 
             mScrollBarAttributes.is64 = true;
-            mScrollBarAttributes.rightShiftCount = 32 - wLeadingZeroCount;
-            verticalScrollBar()->setRange(0, 0x7FFFFFFF);
+            mScrollBarAttributes.rightShiftCount = 32 - leadingZeroCount;
+
+            rangeMin = 0;
+            rangeMax = INT_MAX;
         }
-#else
-        verticalScrollBar()->setRange(0, wMax);
-#endif
     }
-    else
-        verticalScrollBar()->setRange(0, 0);
+
+    verticalScrollBar()->setRange(rangeMin, rangeMax);
+    verticalScrollBar()->setSingleStep(getRowHeight());
+    verticalScrollBar()->setPageStep(viewableRows * getRowHeight());
 }
 
 /************************************************************************************
@@ -804,11 +982,10 @@ void AbstractTableView::updateScrollBarRange(dsint range)
  *
  * @return      row index offset.
  */
-int AbstractTableView::getIndexOffsetFromY(int y)
+dsint AbstractTableView::getIndexOffsetFromY(int y) const
 {
     return (y / getRowHeight());
 }
-
 
 /**
  * @brief       Returns the index of the column corresponding to the given x coordinate.
@@ -817,28 +994,26 @@ int AbstractTableView::getIndexOffsetFromY(int y)
  *
  * @return      Column index.
  */
-int AbstractTableView::getColumnIndexFromX(int x)
+duint AbstractTableView::getColumnIndexFromX(int x) const
 {
-    int wX = -horizontalScrollBar()->value();
-    int wColIndex = 0;
+    int scrollX = -horizontalScrollBar()->value();
 
-    while(wColIndex < getColumnCount())
+    for(duint colIndex = 0; colIndex < getColumnCount(); colIndex++)
     {
-        int col = mColumnOrder[wColIndex];
+        auto col = mColumnOrder[colIndex];
         if(getColumnHidden(col))
+        {
             continue;
-        wX += getColumnWidth(col);
-
-        if(x <= wX)
-        {
-            return mColumnOrder[wColIndex];
         }
-        else if(wColIndex < getColumnCount())
+
+        scrollX += getColumnWidth(col);
+        if(x <= scrollX)
         {
-            wColIndex++;
+            return mColumnOrder[colIndex];
         }
     }
-    return getColumnCount() > 0 ? mColumnOrder[getColumnCount() - 1] : -1;
+
+    return getColumnCount() > 0 ? mColumnOrder[getColumnCount() - 1] : - 1;
 }
 
 /**
@@ -848,30 +1023,68 @@ int AbstractTableView::getColumnIndexFromX(int x)
  *
  * @return      Displayed index.
  */
-int AbstractTableView::getColumnDisplayIndexFromX(int x)
+duint AbstractTableView::getColumnDisplayIndexFromX(int x)
 {
-    int wX = -horizontalScrollBar()->value();
-    int wColIndex = 0;
+    int scrollX = -horizontalScrollBar()->value();
 
-    while(wColIndex < getColumnCount())
+    for(duint colIndex = 0; colIndex < getColumnCount(); colIndex++)
     {
-        int col = mColumnOrder[wColIndex];
+        auto col = mColumnOrder[colIndex];
         if(getColumnHidden(col))
+        {
             continue;
-        wX += getColumnWidth(col);
-
-        if(x <= wX)
-        {
-            return wColIndex;
         }
-        else if(wColIndex < getColumnCount())
+
+        scrollX += getColumnWidth(col);
+        if(x <= scrollX)
         {
-            wColIndex++;
+            return colIndex;
         }
     }
-    return getColumnCount() - 1;
+
+    // TODO: what if there are no columns?
+    return getColumnCount() > 0 ? getColumnCount() - 1 : -1;
 }
 
+void AbstractTableView::updateLastColumnWidth()
+{
+    // Make sure the last column is never smaller than the viewport
+    if(getColumnCount())
+    {
+        int totalWidth = 0;
+        int lastWidth = totalWidth;
+        int last = 0;
+        for(duint i = 0; i < getColumnCount(); i++)
+        {
+            if(getColumnHidden(mColumnOrder[i]))
+                continue;
+            last = mColumnOrder[i];
+            auto & column = mColumnList[last];
+            column.paintedWidth = -1;
+            lastWidth = column.width;
+            totalWidth += lastWidth;
+        }
+
+        lastWidth = totalWidth - lastWidth;
+        int width = viewport()->width();
+        lastWidth = width > lastWidth ? width - lastWidth : 0;
+        if(totalWidth < width)
+            mColumnList[last].paintedWidth = lastWidth;
+    }
+
+    MethodInvoker::invokeMethod([this]()
+    {
+        int totalWidth = 0;
+        for(duint i = 0; i < getColumnCount(); i++)
+            if(!getColumnHidden(i))
+                totalWidth += getColumnWidth(i);
+
+        if(totalWidth > viewport()->width())
+            horizontalScrollBar()->setRange(0, totalWidth - viewport()->width());
+        else
+            horizontalScrollBar()->setRange(0, 0);
+    });
+}
 
 /**
  * @brief       Returns the x coordinate of the beginning of the column at index index.
@@ -880,14 +1093,13 @@ int AbstractTableView::getColumnDisplayIndexFromX(int x)
  *
  * @return      X coordinate of the column index.
  */
-int AbstractTableView::getColumnPosition(int index)
+int AbstractTableView::getColumnPosition(duint index) const
 {
     int posX = -horizontalScrollBar()->value();
 
     if((index >= 0) && (index < getColumnCount()))
     {
-        index = mColumnOrder[index];
-        for(int i = 0; i < index; i++)
+        for(duint i = 0; i < index; i++)
             if(!getColumnHidden(mColumnOrder[i]))
                 posX += getColumnWidth(mColumnOrder[i]);
         return posX;
@@ -898,50 +1110,38 @@ int AbstractTableView::getColumnPosition(int index)
     }
 }
 
-
 /**
- * @brief       Substracts the header heigth from the given y.
+ * @brief       Substracts the header height from the given y.
  *
  * @param[in]   y      y coordinate
  *
- * @return      y - getHeaderHeigth().
+ * @return      y - getHeaderHeight().
  */
-int AbstractTableView::transY(int y)
+int AbstractTableView::transY(int y) const
 {
     return y - getHeaderHeight();
 }
 
-
 /**
- * @brief       Returns the number of viewable rows in the current window (Partially viewable rows are aslo counted).
+ * @brief       Returns the number of viewable rows in the current window (Partially viewable rows are also counted).
  *
  * @return      Number of viewable rows.
  */
-int AbstractTableView::getViewableRowsCount()
+duint AbstractTableView::getViewableRowsCount() const
 {
-    int wTableHeight = this->viewport()->height() - getHeaderHeight();
-    int wCount = wTableHeight / getRowHeight();
+    auto tableHeight = std::max(0, viewport()->height() - getHeaderHeight());
+    auto count = tableHeight / getRowHeight();
 
-    wCount += (wTableHeight % getRowHeight()) > 0 ? 1 : 0;
+    count += (tableHeight % getRowHeight()) > 0 ? 1 : 0;
 
-    emit viewableRows(wCount);
-    return wCount;
+    return count;
 }
 
-
-/**
- * @brief       This virtual method returns the number of remaining lines to print.
- *
- * @return      Number of remaining lines to print.
- */
-int AbstractTableView::getLineToPrintcount()
+duint AbstractTableView::getMaxTableOffset() const
 {
-    int wViewableRowsCount = getViewableRowsCount();
-    dsint wRemainingRowsCount = getRowCount() - mTableOffset;
-    int wCount = (dsint)wRemainingRowsCount > (dsint)wViewableRowsCount ? (int)wViewableRowsCount : (int)wRemainingRowsCount;
-    return wCount;
+    // TODO: is the +1 correct?
+    return getRowCount() - getViewableRowsCount() + 1;
 }
-
 
 /************************************************************************************
                                 New Columns/New Size
@@ -951,159 +1151,185 @@ int AbstractTableView::getLineToPrintcount()
  *
  * @param[in]   width           Width of the column in pixel
  * @param[in]   isClickable     Boolean that tells whether the header is clickable or not
- *
  * @return      Nothing.
  */
 void AbstractTableView::addColumnAt(int width, const QString & title, bool isClickable)
 {
-    HeaderButton_t wHeaderButton;
-    Column_t wColumn;
-    int wCurrentCount;
+    Column column;
+    column.header.isClickable = isClickable;
+    column.width = std::max(mMinColumnWidth, width);
+    column.hidden = false;
+    column.title = title;
+    mColumnOrder.append(mColumnList.length());
+    mColumnList.append(column);
 
-    wHeaderButton.isPressed = false;
-    wHeaderButton.isClickable = isClickable;
-    wHeaderButton.isMouseOver = false;
-
-    wColumn.header = wHeaderButton;
-    wColumn.width = width;
-    wColumn.hidden = false;
-    wColumn.title = title;
-    wCurrentCount = mColumnList.length();
-    mColumnList.append(wColumn);
-    mColumnOrder.append(wCurrentCount);
+    updateLastColumnWidth();
+    accessibilityTableModelChanged();
 }
 
-void AbstractTableView::setRowCount(dsint count)
+void AbstractTableView::setRowCount(duint count)
 {
-    updateScrollBarRange(count);
+    if(mRowCount != count)
+        mShouldReload = true;
     mRowCount = count;
+
+    MethodInvoker::invokeMethod([this]()
+    {
+        updateScrollBarRange(getRowCount());
+    });
+
+    // TODO: report if mTableOffset is out of view
+    accessibilityTableModelChanged();
 }
 
 void AbstractTableView::deleteAllColumns()
 {
     mColumnList.clear();
+    mColumnOrder.clear();
+    accessibilityTableModelChanged();
 }
 
-void AbstractTableView::setColTitle(int index, const QString & title)
+void AbstractTableView::setColTitle(duint col, const QString & title)
 {
-    if(mColumnList.size() > 0 && index >= 0 && index < mColumnList.size())
+    if(mColumnList.size() > 0 && col < (duint)mColumnList.size())
     {
-        Column_t wColum = mColumnList.takeAt(index);
-        wColum.title = title;
-        mColumnList.insert(index - 1, wColum);
+        Column column = mColumnList.takeAt(col);
+        column.title = title;
+        mColumnList.insert(col - 1, column);
     }
 }
 
-QString AbstractTableView::getColTitle(int index)
+QString AbstractTableView::getColTitle(duint col) const
 {
-    if(mColumnList.size() > 0 && index >= 0 && index < mColumnList.size())
-        return mColumnList[index].title;
-    return "";
+    if(mColumnList.size() > 0 && col < (duint)mColumnList.size())
+        return mColumnList[col].title;
+    return QString();
 }
 
 /************************************************************************************
                                 Getter & Setter
 ************************************************************************************/
-dsint AbstractTableView::getRowCount()
+duint AbstractTableView::getRowCount() const
 {
     return mRowCount;
 }
 
-int AbstractTableView::getColumnCount()
+duint AbstractTableView::getColumnCount() const
 {
     return mColumnList.size();
 }
 
-int AbstractTableView::getRowHeight()
+int AbstractTableView::getRowHeight() const
 {
-    int wRowsHeight = QFontMetrics(this->font()).height();
-    wRowsHeight = (wRowsHeight * 105) / 100;
-    wRowsHeight = (wRowsHeight % 2) == 0 ? wRowsHeight : wRowsHeight + 1;
-    return wRowsHeight;
+    return mFontMetrics->height() | 1;
 }
 
-int AbstractTableView::getColumnWidth(int index)
+int AbstractTableView::getColumnWidth(duint col) const
 {
-    if(index < 0)
-        return -1;
-    else if(index < getColumnCount())
-        return mColumnList[index].width;
+    if(col < getColumnCount())
+    {
+        const auto & column = mColumnList[col];
+        if(column.paintedWidth != -1)
+            return column.paintedWidth;
+        else
+            return column.width;
+    }
     return 0;
 }
 
-bool AbstractTableView::getColumnHidden(int col)
+bool AbstractTableView::getColumnHidden(duint col) const
 {
-    if(col < 0)
-        return true;
-    else if(col < getColumnCount())
+    if(col < getColumnCount())
         return mColumnList[col].hidden;
     else
         return true;
 }
 
-void AbstractTableView::setColumnHidden(int col, bool hidden)
+void AbstractTableView::setColumnHidden(duint col, bool hidden)
 {
-    if(col < getColumnCount() && col >= 0)
+    if(col < getColumnCount() && mColumnList[col].hidden != hidden)
+    {
         mColumnList[col].hidden = hidden;
+        accessibilityTableModelChanged();
+    }
 }
 
-void AbstractTableView::setColumnWidth(int index, int width)
+void AbstractTableView::setColumnWidth(duint col, int width)
 {
-    int totalWidth = 0;
-    for(int i = 0; i < getColumnCount(); i++)
-        if(!getColumnHidden(i))
-            totalWidth += getColumnWidth(i);
-    if(totalWidth > this->viewport()->width())
-        horizontalScrollBar()->setRange(0, totalWidth - this->viewport()->width());
-    else if(totalWidth <= this->viewport()->width())
-        horizontalScrollBar()->setRange(0, 0);
+    if(col >= getColumnCount())
+        return;
 
-    mColumnList[index].width = width;
+    mColumnList[col].width = std::max(width, mMinColumnWidth);
+
+    updateLastColumnWidth();
 }
 
-int AbstractTableView::getHeaderHeight()
+void AbstractTableView::setColumnOrder(duint col, duint colNew)
 {
-    if(mHeader.isVisible == true)
+    if(col < getColumnCount() && colNew != 0 && mColumnOrder[col] != colNew - 1)
+    {
+        mColumnOrder[col] = colNew - 1;
+        accessibilityTableModelChanged();
+    }
+}
+
+duint AbstractTableView::getColumnOrder(duint col) const
+{
+    return mColumnOrder[col] + 1;
+}
+
+int AbstractTableView::getHeaderHeight() const
+{
+    if(mHeader.isVisible)
         return mHeader.height;
     else
         return 0;
 }
 
-int AbstractTableView::getTableHeigth()
+int AbstractTableView::getTableHeight() const
 {
     return this->viewport()->height() - getHeaderHeight();
 }
 
-int AbstractTableView::getGuiState()
+AbstractTableView::GuiState AbstractTableView::getGuiState() const
 {
     return mGuiState;
 }
 
-int AbstractTableView::getNbrOfLineToPrint()
+duint AbstractTableView::getNbrOfLineToPrint() const
 {
     return mNbrOfLineToPrint;
 }
 
-void AbstractTableView::setNbrOfLineToPrint(int parNbrOfLineToPrint)
+void AbstractTableView::setNbrOfLineToPrint(duint parNbrOfLineToPrint)
 {
     mNbrOfLineToPrint = parNbrOfLineToPrint;
 }
 
 void AbstractTableView::setShowHeader(bool show)
 {
-    mHeader.isVisible = show;
+    if(mHeader.isVisible != show)
+    {
+        mHeader.isVisible = show;
+        accessibilityTableModelChanged();
+    }
 }
 
-int AbstractTableView::getCharWidth()
+int AbstractTableView::getCharWidth() const
 {
-    return QFontMetrics(this->font()).width(QChar(' '));
+    return mFontMetrics->width(' ');
+}
+
+int AbstractTableView::calculateColumnWidth(int characterCount) const
+{
+    return 7 + getCharWidth() * characterCount;
 }
 
 /************************************************************************************
                            Content drawing control
 ************************************************************************************/
 
-bool AbstractTableView::getDrawDebugOnly()
+bool AbstractTableView::getDrawDebugOnly() const
 {
     return mDrawDebugOnly;
 }
@@ -1113,38 +1339,54 @@ void AbstractTableView::setDrawDebugOnly(bool value)
     mDrawDebugOnly = value;
 }
 
+void AbstractTableView::setAllowPainting(bool allow)
+{
+    mAllowPainting = allow;
+}
+
+bool AbstractTableView::getAllowPainting() const
+{
+    return mAllowPainting;
+}
+
 /************************************************************************************
                            Table offset management
 ************************************************************************************/
-dsint AbstractTableView::getTableOffset()
+duint AbstractTableView::getTableOffset() const
 {
     return mTableOffset;
 }
 
-
-void AbstractTableView::setTableOffset(dsint val)
+void AbstractTableView::setTableOffset(duint val)
 {
-    dsint wMaxOffset = getRowCount() - getViewableRowsCount() + 1;
-    wMaxOffset = wMaxOffset > 0 ? getRowCount() : 0;
-    if(val > wMaxOffset)
+    const duint previousTableOffset = mTableOffset;
+    auto rowCount = getRowCount();
+    auto viewableRows = getViewableRowsCount();
+    if(rowCount <= viewableRows)
+    {
+        mTableOffset = 0;
+        if(mTableOffset != previousTableOffset)
+            accessibilityTableModelChanged();
         return;
+    }
+    auto maxTableOffset = getMaxTableOffset();
 
-    // If val is within the last ViewableRows, then set RVA to rowCount - ViewableRows + 1
-    if(wMaxOffset && val >= (getRowCount() - getViewableRowsCount() + 1))
-        mTableOffset = (getRowCount() - getViewableRowsCount()) + 1;
+    // If val is within the last viewable rows
+    if(maxTableOffset > 0 && val >= maxTableOffset)
+        mTableOffset = maxTableOffset;
     else
         mTableOffset = val;
 
+    if(mTableOffset != previousTableOffset)
+        accessibilityTableModelChanged();
     emit tableOffsetChanged(val);
 
-#ifdef _WIN64
-    int wNewValue = scaleFromUint64ToScrollBarRange(mTableOffset);
-    verticalScrollBar()->setValue(wNewValue);
-    verticalScrollBar()->setSliderPosition(wNewValue);
-#else
-    verticalScrollBar()->setValue(val);
-    verticalScrollBar()->setSliderPosition(val);
-#endif
+    MethodInvoker::invokeMethod([this]()
+    {
+        int newValue = scaleFromUint64ToScrollBarRange(mTableOffset);
+        verticalScrollBar()->setValue(newValue);
+        verticalScrollBar()->setSliderPosition(newValue);
+    });
 }
 
 
@@ -1154,16 +1396,18 @@ void AbstractTableView::setTableOffset(dsint val)
 void AbstractTableView::reloadData()
 {
     mShouldReload = true;
+    accessibilityTableModelChanged();
     emit tableOffsetChanged(mTableOffset);
-    this->viewport()->update();
+    updateViewport();
 }
-
 
 void AbstractTableView::updateViewport()
 {
-    this->viewport()->update();
+    MethodInvoker::invokeMethod([this]()
+    {
+        viewport()->update();
+    });
 }
-
 
 /**
  * @brief       This method is called when data have to be reloaded (e.g. When table offset changes).
@@ -1172,7 +1416,159 @@ void AbstractTableView::updateViewport()
  */
 void AbstractTableView::prepareData()
 {
-    int wViewableRowsCount = getViewableRowsCount();
-    dsint wRemainingRowsCount = getRowCount() - mTableOffset;
-    mNbrOfLineToPrint = (dsint)wRemainingRowsCount > (dsint)wViewableRowsCount ? (int)wViewableRowsCount : (int)wRemainingRowsCount;
+    auto viewableRowsCount = getViewableRowsCount();
+    auto remainingRowsCount = getRowCount() - mTableOffset;
+    mNbrOfLineToPrint = qMin(remainingRowsCount, viewableRowsCount);
+}
+
+duint AbstractTableView::getAddressForPosition(int x, int y)
+{
+    Q_UNUSED(x);
+    Q_UNUSED(y);
+    return 0;
+}
+
+int AbstractTableView::accessibilitySelectedRow() const
+{
+    return 0;
+}
+
+int AbstractTableView::accessibilityVisibleColumnCount() const
+{
+    int result = 0;
+    const int rawColumnCount = static_cast<int>(std::min<duint>(getColumnCount(), 1000));
+    for(int displayColumn = 0; displayColumn < rawColumnCount && displayColumn < mColumnOrder.size(); displayColumn++)
+    {
+        const duint logicalColumn = mColumnOrder[displayColumn];
+        if(logicalColumn < getColumnCount() && !getColumnHidden(logicalColumn))
+            result++;
+    }
+    return result;
+}
+
+void AbstractTableView::accessibilitySelectionChanged()
+{
+    if(!QAccessible::isActive())
+        return;
+
+    // A selection change often follows reloadData() synchronously. Deliver the
+    // pending reset first so clients never receive a child-selection event and
+    // then immediately have that child's ID invalidated by the reset.
+    if(accessibilityModelChangePending)
+    {
+        prepareData();
+        accessibilityModelChangePending = false;
+        accessibilityNotifyTableModelChanged();
+    }
+
+    const int selectedRow = accessibilitySelectedRow();
+    const int selectedColumn = accessibilitySelectedColumn;
+    const bool rowChanged = selectedRow != accessibilityPreviousSelectedRow;
+
+    // Match QTableView's event producer: target the QObject-backed view and
+    // identify its virtual cell by direct-child index. QAccessibleEvent then
+    // resolves the current table adapter during each dispatch, so no event
+    // retains an adapter or cell that a platform bridge may replace.
+    const auto sendCellEvent = [this](int row, int column, QAccessible::Event type)
+    {
+        const int columns = accessibilityVisibleColumnCount();
+        const duint totalRows = getRowCount();
+        const duint remainingRows = mTableOffset < totalRows ? totalRows - mTableOffset : 0;
+        const int rows = static_cast<int>(std::min<duint>({getViewableRowsCount(), remainingRows, 10000}));
+        if(row < 0 || row >= rows || column < 0 || column >= columns)
+            return false;
+
+        QAccessibleEvent event(this, type);
+        // Match QAccessibleTable's structural grid: hidden corner and column
+        // headers in row zero, then a hidden row header before each data row.
+        event.setChild((row + 1) * (columns + 1) + column + 1);
+        QAccessible::updateAccessibility(&event);
+        return true;
+    };
+
+    if(rowChanged)
+    {
+        sendCellEvent(accessibilityPreviousSelectedRow, accessibilityPreviousSelectedColumn,
+                      QAccessible::SelectionRemove);
+        sendCellEvent(selectedRow, selectedColumn, QAccessible::SelectionAdd);
+    }
+
+    if(hasFocus() && !sendCellEvent(selectedRow, selectedColumn, QAccessible::Focus))
+    {
+        QAccessibleEvent focusEvent(this, QAccessible::Focus);
+        QAccessible::updateAccessibility(&focusEvent);
+    }
+
+    accessibilityPreviousSelectedRow = selectedRow;
+    accessibilityPreviousSelectedColumn = selectedColumn;
+}
+
+void AbstractTableView::accessibilityTableModelChanged()
+{
+    accessibilityModelRevision++;
+    accessibilityPreviousSelectedRow = -1;
+    accessibilityPreviousSelectedColumn = -1;
+
+    const int visibleColumnCount = accessibilityVisibleColumnCount();
+    accessibilitySelectedColumn = visibleColumnCount > 0
+                                  ? std::min(accessibilitySelectedColumn, visibleColumnCount - 1)
+                                  : 0;
+
+    if(QAccessible::isActive())
+    {
+        accessibilityModelChangePending = true;
+        updateViewport();
+    }
+}
+
+void AbstractTableView::accessibilityNotifyTableModelChanged()
+{
+    if(!QAccessible::isActive())
+        return;
+
+    // Use the QObject constructor for the QObject-backed table. The Qt 6
+    // interface constructor stores the interface ID in the m_child union and
+    // then stores iface->object(); uniqueId() consequently treats that ID as a
+    // child index. Cocoa calls uniqueId() while posting table notifications.
+    QAccessibleTableModelChangeEvent model(this, QAccessibleTableModelChangeEvent::ModelReset);
+
+    const duint totalRows = getRowCount();
+    const duint remainingRows = mTableOffset < totalRows ? totalRows - mTableOffset : 0;
+    const int accessibleRows = static_cast<int>(std::min<duint>({getViewableRowsCount(), remainingRows, 10000}));
+    const int accessibleColumns = accessibilityVisibleColumnCount();
+
+    if(accessibleRows > 0)
+    {
+        model.setFirstRow(0);
+        model.setLastRow(accessibleRows - 1);
+    }
+    if(accessibleColumns > 0)
+    {
+        model.setFirstColumn(0);
+        model.setLastColumn(accessibleColumns - 1);
+    }
+    QAccessible::updateAccessibility(&model);
+}
+
+void AbstractTableView::accessibilityMousePressSetColumn(QMouseEvent* event)
+{
+    // update selected column
+    if(QAccessible::isActive() && getColumnCount() && event->y() > getHeaderHeight())
+    {
+        accessibilitySelectedColumn = getColumnDisplayIndexFromX(event->x());
+        if(accessibilitySelectedColumn == -1)
+        {
+            accessibilitySelectedColumn = 0;
+        }
+        else
+        {
+            // Exclude hidden columns
+            for(int colIndex = 0; colIndex < accessibilitySelectedColumn; colIndex++)
+            {
+                if(getColumnHidden(mColumnOrder[colIndex]))
+                    accessibilitySelectedColumn--;
+            }
+        }
+        accessibilitySelectionChanged();
+    }
 }

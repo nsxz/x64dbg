@@ -1,5 +1,4 @@
-#ifndef SHORTCUTSDIALOG_H
-#define SHORTCUTSDIALOG_H
+#pragma once
 
 #include <QDialog>
 #include <QHeaderView>
@@ -17,7 +16,7 @@ class ShortcutsDialog : public QDialog
     int currentRow;
 
 public:
-    explicit ShortcutsDialog(QWidget* parent = 0);
+    explicit ShortcutsDialog(QWidget* parent = nullptr);
     ~ShortcutsDialog();
 
 protected slots:
@@ -26,11 +25,13 @@ protected slots:
 
 private slots:
     void on_btnSave_clicked();
+    void on_btnClearShortcut_clicked();
     void rejectedSlot();
+    void on_FilterTextChanged(const QString & actionName);
 
 private:
     Ui::ShortcutsDialog* ui;
     QMap<QString, Configuration::Shortcut> ShortcutsBackup;
+    void filterShortcutsByName(const QString & nameFilter, QMap<QString, Configuration::Shortcut> & mapToFill);
+    void showShortcutsFiltered(const QString & actionName);
 };
-
-#endif // SHORTCUTSDIALOG_H

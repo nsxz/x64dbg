@@ -3,12 +3,8 @@
 
 #include "addrinfo.h"
 
-struct ARGUMENTSINFO
+struct ARGUMENTSINFO : RangeInfo
 {
-    char mod[MAX_MODULE_SIZE];
-    duint start;
-    duint end;
-    bool manual;
     duint instructioncount;
 };
 
@@ -19,8 +15,9 @@ bool ArgumentDelete(duint Address);
 void ArgumentDelRange(duint Start, duint End, bool DeleteManual = false);
 void ArgumentCacheSave(JSON Root);
 void ArgumentCacheLoad(JSON Root);
-void ArgumentClear();
+void ArgumentClear(bool Terminating);
 void ArgumentGetList(std::vector<ARGUMENTSINFO> & list);
 bool ArgumentGetInfo(duint Address, ARGUMENTSINFO & info);
+bool ArgumentEnum(ARGUMENTSINFO* List, size_t* Size);
 
 #endif // _ARGUMENT_H

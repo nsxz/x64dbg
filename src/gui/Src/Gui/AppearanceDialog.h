@@ -1,20 +1,24 @@
-#ifndef APPEARANCEDIALOG_H
-#define APPEARANCEDIALOG_H
+#pragma once
 
+#include <QAction>
 #include <QDialog>
 #include <QMap>
+#include <QColorDialog>
+#include <QLineEdit>
 
 namespace Ui
 {
     class AppearanceDialog;
 }
 
+class QTreeWidgetItem;
+
 class AppearanceDialog : public QDialog
 {
     Q_OBJECT
 
 public:
-    explicit AppearanceDialog(QWidget* parent = 0);
+    explicit AppearanceDialog(QWidget* parent = nullptr);
     ~AppearanceDialog();
 
 private slots:
@@ -74,15 +78,19 @@ private slots:
     void on_buttonApplicationFont_clicked();
     void on_buttonFontDefaults_clicked();
     void rejectedSlot();
+    void colorSelectionChangedSlot(QColor color);
 
 private:
     Ui::AppearanceDialog* ui;
+    QLineEdit* colorLineEdit = nullptr;
 
     struct ColorInfo
     {
         QString propertyName;
         QString colorName;
         QString backgroundColorName;
+        QString defaultBackgroundColorName;
+        QString defaultFontName;
     };
 
     QList<ColorInfo> colorInfoList;
@@ -94,12 +102,17 @@ private:
 
     QAction* defaultValueAction;
     QAction* currentSettingAction;
+    QTreeWidgetItem* currentCategory;
+    QString currentBackgroundColorName;
+    QString currentFontName;
 
     bool isInit;
 
+    void colorInfoListCategory(QString categoryName, const QString & currentBackgroundColorName, const QString & currentFontName);
     void colorInfoListAppend(QString propertyName, QString colorName, QString backgroundColorName);
     void colorInfoListInit();
     void fontInit();
-};
 
-#endif // APPEARANCEDIALOG_H
+    void selectColor(QLineEdit* lineEdit, QColorDialog::ColorDialogOptions options = QColorDialog::ColorDialogOptions());
+    static QString colorToString(const QColor & color);
+};

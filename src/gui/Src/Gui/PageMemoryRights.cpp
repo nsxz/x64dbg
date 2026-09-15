@@ -1,12 +1,13 @@
 #include "Imports.h"
 #include "PageMemoryRights.h"
 #include "ui_PageMemoryRights.h"
+#include "StringUtil.h"
 
 PageMemoryRights::PageMemoryRights(QWidget* parent) : QDialog(parent), ui(new Ui::PageMemoryRights)
 {
     ui->setupUi(this);
     //set window flags
-    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
+    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
     setModal(true);
     addr = 0;
     size = 0;
@@ -28,18 +29,19 @@ void PageMemoryRights::RunAddrSize(duint addrin, duint sizein, QString pagetypei
     duint nr_pages = size / PAGE_SIZE;
     tableWidget->setColumnCount(2);
     tableWidget->setRowCount(nr_pages);
-    tableWidget->setHorizontalHeaderItem(0, new QTableWidgetItem(QString("Address")));
-    tableWidget->setHorizontalHeaderItem(1, new QTableWidgetItem(QString("Rights")));
+    tableWidget->setHorizontalHeaderItem(0, new QTableWidgetItem(QString(tr("Address"))));
+    tableWidget->setHorizontalHeaderItem(1, new QTableWidgetItem(QString(tr("Rights"))));
 
     duint actual_addr;
     char rights[RIGHTS_STRING_SIZE];
     for(duint i = 0; i < nr_pages; i++)
     {
         actual_addr = addr + (i * PAGE_SIZE);
-        tableWidget->setItem(i, 0, new QTableWidgetItem(QString("%1").arg(actual_addr, sizeof(duint) * 2, 16, QChar('0')).toUpper()));
+        tableWidget->setItem(i, 0, new QTableWidgetItem(ToPtrString(actual_addr)));
         if(DbgFunctions()->GetPageRights(actual_addr, rights))
             tableWidget->setItem(i, 1, new QTableWidgetItem(QString(rights)));
     }
+    tableWidget->resizeColumnsToContents();
 
     QModelIndex idx = (ui->pagetableWidget->model()->index(0, 0));
     ui->pagetableWidget->selectionModel()->select(idx, QItemSelectionModel::Select);
@@ -53,24 +55,27 @@ void PageMemoryRights::RunAddrSize(duint addrin, duint sizein, QString pagetypei
 
 void PageMemoryRights::on_btnSelectall_clicked()
 {
-    for(int i = 0; i < ui->pagetableWidget->rowCount(); i++)
-    {
-        for(int j = 0; j < ui->pagetableWidget->columnCount(); j++)
-        {
-            QModelIndex idx = (ui->pagetableWidget->model()->index(i, j));
-            ui->pagetableWidget->selectionModel()->select(idx, QItemSelectionModel::Select);
-        }
-    }
+    const auto rowCount = ui->pagetableWidget->rowCount();
+    const auto columnCount = ui->pagetableWidget->columnCount();
+
+    QModelIndex topLeft = ui->pagetableWidget->model()->index(0, 0);
+    QModelIndex bottomRight = ui->pagetableWidget->model()->index(rowCount - 1, columnCount - 1);
+
+    QItemSelection selection(topLeft, bottomRight);
+    ui->pagetableWidget->selectionModel()->select(selection, QItemSelectionModel::Select);
 }
 
 void PageMemoryRights::on_btnDeselectall_clicked()
 {
-    QModelIndexList indexList = ui->pagetableWidget->selectionModel()->selectedIndexes();
-    foreach(QModelIndex index, indexList)
-    {
-        ui->pagetableWidget->selectionModel()->select(index, QItemSelectionModel::Deselect);
+    QModelIndexList selectedIndexes = ui->pagetableWidget->selectionModel()->selectedIndexes();
+    if(selectedIndexes.isEmpty())
+        return;
 
-    }
+    QModelIndex topLeft = selectedIndexes.first();
+    QModelIndex bottomRight = selectedIndexes.last();
+
+    QItemSelection selection(topLeft, bottomRight);
+    ui->pagetableWidget->selectionModel()->select(selection, QItemSelectionModel::Deselect);
 }
 
 void PageMemoryRights::on_btnSetrights_clicked()

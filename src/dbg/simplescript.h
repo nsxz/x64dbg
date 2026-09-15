@@ -1,45 +1,49 @@
-#ifndef _SIMPLESCRIPT_H
-#define _SIMPLESCRIPT_H
+#pragma once
 
-#include "command.h"
+#include "_global.h"
 
-//structures
-struct SCRIPTBP
+enum SCRIPTSTATE
 {
-    int line;
-    bool silent; //do not show in GUI
+    SCRIPT_PAUSED = 0,
+    SCRIPT_STEPPING,
+    SCRIPT_RUNNING,
 };
 
-struct LINEMAPENTRY
+enum class ScriptInterrupt
 {
-    SCRIPTLINETYPE type;
-    char raw[256];
-    union
-    {
-        char command[256];
-        SCRIPTBRANCH branch;
-        char label[256];
-        char comment[256];
-    } u;
+    None = 0,
+    YieldDebugEvent,
+    AbortUser,
+    AbortAssertion,
+    AbortShutdown,
 };
 
-//functions
-void scriptload(const char* filename);
-void scriptunload();
-void scriptrun(int destline);
-void scriptstep();
-bool scriptbptoggle(int line);
-bool scriptbpget(int line);
-bool scriptcmdexec(const char* command);
-void scriptabort();
-SCRIPTLINETYPE scriptgetlinetype(int line);
-void scriptsetip(int line);
-void scriptreset();
-bool scriptgetbranchinfo(int line, SCRIPTBRANCH* info);
+struct ScriptInterruptState
+{
+    SCRIPTSTATE state;
+    bool gui;
+};
 
-//script commands
-CMDRESULT cbScriptLoad(int argc, char* argv[]);
-CMDRESULT cbScriptMsg(int argc, char* argv[]);
-CMDRESULT cbScriptMsgyn(int argc, char* argv[]);
+enum class ScriptCommandOutcome
+{
+    Continue = 0,
+    Pause,
+    Abort,
+};
 
-#endif // _SIMPLESCRIPT_H
+bool ScriptLoadAwait(const char* filename, bool gui);
+void ScriptUnloadAwait();
+void ScriptRunAsync(int destline, bool gui);
+bool ScriptRunAwait(int destline, bool gui);
+void ScriptStepAsync(bool gui);
+bool ScriptBpGetLocked(int line);
+bool ScriptBpToggleLocked(int line);
+ScriptCommandOutcome ScriptCmdExecAwait(const char* command, bool gui, const SCRIPTSTATE* interruptState);
+bool ScriptIsExecutingCommand();
+void ScriptSetIpAwait(int line);
+ScriptInterruptState ScriptInterruptAwait(ScriptInterrupt reason);
+void ScriptResume();
+SCRIPTLINETYPE ScriptGetLineTypeLocked(int line);
+bool ScriptGetBranchInfoLocked(int line, SCRIPTBRANCH* info);
+void ScriptLogLocked(const char* msg);
+bool ScriptExecAwait(const char* filename, bool gui);

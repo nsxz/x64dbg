@@ -1,5 +1,6 @@
 #include "CommandLineEdit.h"
 #include "Bridge.h"
+#include "Configuration.h"
 
 CommandLineEdit::CommandLineEdit(QWidget* parent)
     : HistoryLineEdit(parent),
@@ -16,6 +17,8 @@ CommandLineEdit::CommandLineEdit(QWidget* parent)
     mCompleterModel = (QStringListModel*)mCompleter->model();
     this->setCompleter(mCompleter);
 
+    loadSettings("CommandLine");
+
     //Setup signals & slots
     connect(mCompleter, SIGNAL(activated(const QString &)), this, SLOT(clear()), Qt::QueuedConnection);
     connect(this, SIGNAL(textEdited(QString)), this, SLOT(autoCompleteUpdate(QString)));
@@ -25,49 +28,77 @@ CommandLineEdit::CommandLineEdit(QWidget* parent)
     connect(Bridge::getBridge(), SIGNAL(registerScriptLang(SCRIPTTYPEINFO*)), this, SLOT(registerScriptType(SCRIPTTYPEINFO*)));
     connect(Bridge::getBridge(), SIGNAL(unregisterScriptLang(int)), this, SLOT(unregisterScriptType(int)));
     connect(mCmdScriptType, SIGNAL(currentIndexChanged(int)), this, SLOT(scriptTypeChanged(int)));
+    connect(mCmdScriptType, SIGNAL(activated(int)), this, SLOT(scriptTypeActivated(int)));
+    connect(Config(), SIGNAL(fontsUpdated()), this, SLOT(fontsUpdated()));
+
+    fontsUpdated();
+}
+
+CommandLineEdit::~CommandLineEdit()
+{
+    saveSettings("CommandLine");
 }
 
 void CommandLineEdit::keyPressEvent(QKeyEvent* event)
 {
-    // We only want key-press events for TAB
-    if(event->type() != QEvent::KeyPress || event->key() != Qt::Key_Tab)
+    if(event->type() == QEvent::KeyPress && event->key() == Qt::Key_Tab)
     {
-        HistoryLineEdit::keyPressEvent(event);
-        return;
-    }
+        // TAB autocompletes the command
+        QStringList stringList = mCompleterModel->stringList();
 
-    // Tab autocompletes the command
-    QStringList stringList = mCompleterModel->stringList();
-
-    if(stringList.size())
-    {
-        QAbstractItemView* popup = mCompleter->popup();
-        QModelIndex currentModelIndex = popup->currentIndex();
-
-        // If not item selected, select first one in the list
-        if(currentModelIndex.row() < 0)
-            currentModelIndex = mCompleter->currentIndex();
-
-        // If popup list is not visible, selected next suggested command
-        if(!popup->isVisible())
+        if(stringList.size())
         {
-            for(int row = 0; row < popup->model()->rowCount(); row++)
-            {
-                QModelIndex modelIndex = popup->model()->index(row, 0);
+            QAbstractItemView* popup = mCompleter->popup();
+            QModelIndex currentModelIndex = popup->currentIndex();
 
-                // If the lineedit contains a suggested command, get the next suggested one
-                if(popup->model()->data(modelIndex) == this->text())
+            // If not item selected, select first one in the list
+            if(currentModelIndex.row() < 0)
+                currentModelIndex = mCompleter->currentIndex();
+
+            // If popup list is not visible, selected next suggested command
+            if(!popup->isVisible())
+            {
+                for(int row = 0; row < popup->model()->rowCount(); row++)
                 {
-                    int nextModelIndexRow = (currentModelIndex.row() + 1) % popup->model()->rowCount();
-                    currentModelIndex = popup->model()->index(nextModelIndexRow, 0);
-                    break;
+                    QModelIndex modelIndex = popup->model()->index(row, 0);
+
+                    // If the lineedit contains a suggested command, get the next suggested one
+                    if(popup->model()->data(modelIndex) == this->text())
+                    {
+                        int nextModelIndexRow = (currentModelIndex.row() + 1) % popup->model()->rowCount();
+                        currentModelIndex = popup->model()->index(nextModelIndexRow, 0);
+                        break;
+                    }
                 }
             }
-        }
 
-        popup->setCurrentIndex(currentModelIndex);
-        popup->hide();
+            popup->setCurrentIndex(currentModelIndex);
+            popup->hide();
+        }
     }
+    else if(event->type() == QEvent::KeyPress && event->modifiers() == Qt::ControlModifier)
+    {
+        int index = mCmdScriptType->currentIndex(), count = mCmdScriptType->count();
+        if(event->key() == Qt::Key_Up)
+        {
+            // Ctrl + Up selects the previous language
+            if(index > 0)
+                index--;
+            else
+                index = count - 1;
+        }
+        else if(event->key() == Qt::Key_Down)
+        {
+            // Ctrl + Down selects the next language
+            index = (index + 1) % count;
+        }
+        else
+            HistoryLineEdit::keyPressEvent(event);
+        mCmdScriptType->setCurrentIndex(index);
+        scriptTypeActivated(index);
+    }
+    else
+        HistoryLineEdit::keyPressEvent(event);
 }
 
 // Disables moving to Prev/Next child when pressing tab
@@ -82,10 +113,15 @@ void CommandLineEdit::execute()
     if(mCurrentScriptIndex == -1)
         return;
     GUISCRIPTEXECUTE exec = mScriptInfo[mCurrentScriptIndex].execute;
-    const QString & cmd = text();
+    QString cmd = text();
 
     if(exec)
     {
+        if(cmd.trimmed().isEmpty())
+            if(Config()->getBool("Gui", "AutoRepeatOnEnter"))
+                cmd = getLineFromHistory();
+        // Clear the status bar
+        GuiAddStatusBarMessage("\n");
         // Send this string directly to the user
         exec(cmd.toUtf8().constData());
     }
@@ -149,32 +185,42 @@ void CommandLineEdit::autoCompleteUpdate(const QString text)
         {
             // Native auto-completion
             if(mCurrentScriptIndex == 0)
+            {
+                if(mDefaultCompletionsUpdated)
+                {
+                    mDefaultCompletions.removeDuplicates();
+                    mDefaultCompletionsUpdated = false;
+                }
                 mCompleterModel->setStringList(mDefaultCompletions);
+            }
         }
 
         // Restore index
-        mCompleter->popup()->setCurrentIndex(modelIndex);
+        if(mCompleter->popup()->model()->rowCount() > modelIndex.row())
+            mCompleter->popup()->setCurrentIndex(modelIndex);
     }
 }
 
 void CommandLineEdit::autoCompleteAddCmd(const QString cmd)
 {
-    mDefaultCompletions << cmd.split(QChar('\1'), QString::SkipEmptyParts);
-    mDefaultCompletions.removeDuplicates();
+    mDefaultCompletions << cmd.split(QChar(','), QString::SkipEmptyParts);
+    mDefaultCompletionsUpdated = true;
 }
 
 void CommandLineEdit::autoCompleteDelCmd(const QString cmd)
 {
-    QStringList deleteList = cmd.split(QChar('\1'), QString::SkipEmptyParts);
+    QStringList deleteList = cmd.split(QChar(','), QString::SkipEmptyParts);
 
     for(int i = 0; i < deleteList.size(); i++)
         mDefaultCompletions.removeAll(deleteList.at(i));
+    mDefaultCompletionsUpdated = true;
 }
 
 void CommandLineEdit::autoCompleteClearAll()
 {
     // Update internal list only
     mDefaultCompletions.clear();
+    mDefaultCompletionsUpdated = false;
 }
 
 void CommandLineEdit::registerScriptType(SCRIPTTYPEINFO* info)
@@ -182,7 +228,7 @@ void CommandLineEdit::registerScriptType(SCRIPTTYPEINFO* info)
     // Must be valid pointer
     if(!info)
     {
-        Bridge::getBridge()->setResult(0);
+        Bridge::getBridge()->setResult(BridgeResult::RegisterScriptLang, 0);
         return;
     }
 
@@ -196,7 +242,11 @@ void CommandLineEdit::registerScriptType(SCRIPTTYPEINFO* info)
     if(info->id == 0)
         mCurrentScriptIndex = 0;
 
-    Bridge::getBridge()->setResult(1);
+    char savedType[MAX_SETTING_SIZE] = "";
+    if(BridgeSettingGet("Gui", "ScriptType", savedType) && strcmp(info->name, savedType) == 0)
+        mCmdScriptType->setCurrentIndex(info->id);
+
+    Bridge::getBridge()->setResult(BridgeResult::RegisterScriptLang, 1);
 }
 
 void CommandLineEdit::unregisterScriptType(int id)
@@ -227,6 +277,30 @@ void CommandLineEdit::scriptTypeChanged(int index)
 {
     mCurrentScriptIndex = index;
 
+    // Custom placeholder for the default commands
+    duint timeWastedDebugging = 0;
+    BridgeSettingGetUint("Engine", "TimeWastedDebugging", &timeWastedDebugging);
+    if(index == 0 && timeWastedDebugging < 60 * 60 * 10)
+    {
+        setPlaceholderText(tr("Commands are comma separated (like assembly instructions): mov eax, ebx"));
+    }
+    else
+    {
+        setPlaceholderText(QString());
+    }
+
     // Force reset autocompletion (blank string)
     emit textEdited("");
+}
+
+void CommandLineEdit::scriptTypeActivated(int index)
+{
+    if(index >= 0 && index < mScriptInfo.size())
+        BridgeSettingSet("Gui", "ScriptType", mScriptInfo[index].name);
+}
+
+void CommandLineEdit::fontsUpdated()
+{
+    setFont(ConfigFont("Log"));
+    mCompleter->popup()->setFont(ConfigFont("Log"));
 }

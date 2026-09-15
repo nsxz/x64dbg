@@ -61,7 +61,22 @@ SCRIPT_EXPORT duint Script::Gui::Stack::SelectionGetEnd()
     return Gui::SelectionGetEnd(StackWindow);
 }
 
-static inline int windowToBridge(Script::Gui::Window window)
+SCRIPT_EXPORT duint Script::Gui::Graph::SelectionGetStart()
+{
+    return SelectionGetStart(GraphWindow);
+}
+
+SCRIPT_EXPORT duint Script::Gui::MemMap::SelectionGetStart()
+{
+    return SelectionGetStart(MemMapWindow);
+}
+
+SCRIPT_EXPORT duint Script::Gui::SymMod::SelectionGetStart()
+{
+    return SelectionGetStart(SymModWindow);
+}
+
+static inline GUISELECTIONTYPE windowToBridge(Script::Gui::Window window)
 {
     switch(window)
     {
@@ -71,6 +86,12 @@ static inline int windowToBridge(Script::Gui::Window window)
         return GUI_DUMP;
     case Script::Gui::StackWindow:
         return GUI_STACK;
+    case Script::Gui::GraphWindow:
+        return GUI_GRAPH;
+    case Script::Gui::MemMapWindow:
+        return GUI_MEMMAP;
+    case Script::Gui::SymModWindow:
+        return GUI_SYMMOD;
     default:
         return GUI_DISASSEMBLY;
     }

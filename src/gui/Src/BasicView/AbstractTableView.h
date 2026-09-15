@@ -1,5 +1,4 @@
-#ifndef ABSTRACTTABLEVIEW_H
-#define ABSTRACTTABLEVIEW_H
+#pragma once
 
 #include <QScrollBar>
 #include <QAbstractScrollArea>
@@ -10,134 +9,131 @@
 #include <QMenu>
 #include "StringUtil.h"
 #include "Configuration.h"
-#include "MenuBuilder.h"
-#include "QActionLambda.h"
-#include "CachedFontMetrics.h"
+#include <Utils/MenuBuilder.h>
+#include "MiscUtil.h"
+#include <Utils/ActionHelpers.h>
+
+class CachedFontMetrics;
+class ColumnReorderDialog;
 
 //Hacky class that fixes a really annoying cursor problem
 class AbstractTableScrollBar : public QScrollBar
 {
     Q_OBJECT
 public:
-    AbstractTableScrollBar(QScrollBar* scrollbar)
-    {
-        setOrientation(scrollbar->orientation());
-        setParent(scrollbar->parentWidget());
-    }
-
-    void enterEvent(QEvent* event)
-    {
-        Q_UNUSED(event);
-        QApplication::setOverrideCursor(Qt::ArrowCursor);
-    }
-
-    void leaveEvent(QEvent* event)
-    {
-        Q_UNUSED(event);
-        QApplication::restoreOverrideCursor();
-    }
+    explicit AbstractTableScrollBar(QScrollBar* scrollbar);
+    bool event(QEvent* event) override;
 };
 
-class AbstractTableView : public QAbstractScrollArea
+class AbstractTableView;
+class AbstractTableView : public QAbstractScrollArea, public ActionHelper<AbstractTableView>
 {
     Q_OBJECT
 
 public:
-    enum GuiState_t {NoState, ReadyToResize, ResizeColumnState, HeaderButtonPressed, HeaderButtonReordering};
-
-    // Constructor
-    explicit AbstractTableView(QWidget* parent = 0);
-    ~AbstractTableView();
+    explicit AbstractTableView(QWidget* parent = nullptr);
+    virtual ~AbstractTableView() = default;
 
     // Configuration
     virtual void Initialize();
     virtual void updateColors();
     virtual void updateFonts();
-    virtual void updateShortcuts();
 
     // Pure Virtual Methods
-    virtual QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h) = 0;
+    virtual QString paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h) = 0;
+    virtual QColor getCellColor(duint row, duint col);
 
     // Painting Stuff
-    void paintEvent(QPaintEvent* event);
+    void paintEvent(QPaintEvent* event) override;
 
     // Mouse Management
-    void mouseMoveEvent(QMouseEvent* event);
-    void mousePressEvent(QMouseEvent* event);
-    void mouseReleaseEvent(QMouseEvent* event);
-    void mouseDoubleClickEvent(QMouseEvent* event);
-    void wheelEvent(QWheelEvent* event);
-    void resizeEvent(QResizeEvent* event);
-    void keyPressEvent(QKeyEvent* event);
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
 
     // ScrollBar Management
-    virtual dsint sliderMovedHook(int type, dsint value, dsint delta);
-    int scaleFromUint64ToScrollBarRange(dsint value);
-    dsint scaleFromScrollBarRangeToUint64(int value);
-    void updateScrollBarRange(dsint range);
+    virtual duint sliderMovedHook(QScrollBar::SliderAction action, duint prevTableOffset, dsint delta); // can be made protected
+    int scaleFromUint64ToScrollBarRange(duint value); // can be made private
+    duint scaleFromScrollBarRangeToUint64(int value); // can be made private
 
+    void updateScrollBarRange(duint range); // setRowCount+resizeEvent needs this, can be made private
 
     // Coordinates Utils
-    int getIndexOffsetFromY(int y);
-    int getColumnIndexFromX(int x);
-    int getColumnPosition(int index);
-    int transY(int y);
-    int getViewableRowsCount();
-    virtual int getLineToPrintcount();
+    dsint getIndexOffsetFromY(int y) const; // can be made protected
+    duint getColumnIndexFromX(int x) const; // can be made protected
+    int getColumnPosition(duint column) const; // can be made protected
+    int transY(int y) const; // can be made protected
+
+    // TODO: this should probably be uint32_t?
+    duint getViewableRowsCount() const; // can be made protected
+    duint getMaxTableOffset() const;
 
     // New Columns/New Size
     virtual void addColumnAt(int width, const QString & title, bool isClickable);
-    virtual void setRowCount(dsint count);
-    virtual void deleteAllColumns();
-    void setColTitle(int index, const QString & title);
-    QString getColTitle(int index);
+    virtual void setRowCount(duint count);
+    virtual void deleteAllColumns(); // can be made protected, although it makes sense as a public API
+    void setColTitle(duint col, const QString & title); // can be deleted, although it makes sense as a public API
+    QString getColTitle(duint col) const; // can be deleted, although it makes sense as a public API
+
+    enum GuiState
+    {
+        NoState,
+        ReadyToResize,
+        ResizeColumnState,
+        HeaderButtonPressed,
+        HeaderButtonReordering
+    };
 
     // Getter & Setter
-    dsint getRowCount();
-    int getColumnCount();
-    int getRowHeight();
-    int getColumnWidth(int index);
-    void setColumnWidth(int index, int width);
-    int getHeaderHeight();
-    int getTableHeigth();
-    int getGuiState();
-    int getNbrOfLineToPrint();
-    void setNbrOfLineToPrint(int parNbrOfLineToPrint);
+    duint getRowCount() const;
+    duint getColumnCount() const;
+    int getRowHeight() const;
+    int getColumnWidth(duint col) const;
+    void setColumnWidth(duint col, int width);
+    void setColumnOrder(duint col, duint colNew);
+    duint getColumnOrder(duint col) const;
+    int getHeaderHeight() const; // can be made protected
+    int getTableHeight() const; // can be made protected
+    GuiState getGuiState() const; // can be made protected
+    duint getNbrOfLineToPrint() const; // TODO: should this be signed?
+    void setNbrOfLineToPrint(duint parNbrOfLineToPrint);
     void setShowHeader(bool show);
-    int getCharWidth();
-    bool getColumnHidden(int col);
-    void setColumnHidden(int col, bool hidden);
+    int getCharWidth() const;
+    int calculateColumnWidth(int characterCount) const;
+    bool getColumnHidden(duint col) const;
+    void setColumnHidden(duint col, bool hidden);
+    bool getDrawDebugOnly() const;
+    void setDrawDebugOnly(bool value);
+    bool getAllowPainting() const;
+    void setAllowPainting(bool allow);
 
     // UI customization
     void loadColumnFromConfig(const QString & viewName);
     void saveColumnToConfig();
     static void setupColumnConfigDefaultValue(QMap<QString, duint> & map, const QString & viewName, int columnCount);
 
-    // Content drawing control
-    bool getDrawDebugOnly();
-    void setDrawDebugOnly(bool value);
-
     // Table offset management
-    dsint getTableOffset();
-    void setTableOffset(dsint val);
+    duint getTableOffset() const; // TODO: duint
+    void setTableOffset(duint val); // TODO: duint
 
     // Update/Reload/Refresh/Repaint
     virtual void prepareData();
 
+    virtual duint getAddressForPosition(int x, int y);
+
 signals:
     void enterPressedSignal();
-    void headerButtonPressed(int col);
-    void headerButtonReleased(int col);
-    void tableOffsetChanged(dsint i);
-    void viewableRows(int rows);
+    void headerButtonPressed(duint col);
+    void headerButtonReleased(duint col);
+    void tableOffsetChanged(duint i);
+    void viewableRowsChanged(duint rowCount);
     void repainted();
 
 public slots:
-    // Configuration
-    void slot_updateColors();
-    void slot_updateFonts();
-    void slot_updateShortcuts();
-
     // Update/Reload/Refresh/Repaint
     virtual void reloadData();
     void updateViewport();
@@ -145,191 +141,113 @@ public slots:
     // ScrollBar Management
     void vertSliderActionSlot(int action);
 
-private:
-    typedef struct _ColumnResizingData_t
-    {
-        bool splitHandle;
-        int index;
-        int lastPosX;
-    } ColumnResizingData_t;
+    void editColumnDialog();
 
-    typedef struct _HeaderButton_t
-    {
-        bool isClickable;
-        bool isPressed;
-        bool isMouseOver;
-    } HeaderButton_t;
-
-    typedef struct _Column_t
-    {
-        int width;
-        bool hidden;
-        HeaderButton_t header;
-        QString title;
-    } Column_t;
-
-    typedef struct _Header_t
-    {
-        bool isVisible;
-        int height;
-        int activeButtonIndex;
-    } Header_t;
-
-    typedef struct _ScrollBar64_t
-    {
-        bool is64;
-        int rightShiftCount;
-    } ScrollBar64_t;
-
-    GuiState_t mGuiState;
-
-    ColumnResizingData_t mColResizeData;
-
-    QPushButton mHeaderButtonSytle;
-
-    QList<Column_t> mColumnList;
-
-    QList<int> mColumnOrder;
-    int mReorderStartX;
-    int mHoveredColumnDisplayIndex;
-
-    dsint mRowCount;
-
-    int mMouseWheelScrollDelta;
-
-    dsint mTableOffset;
-    Header_t mHeader;
-
-    int mNbrOfLineToPrint;
-
-    dsint mPrevTableOffset;
-
-    bool mShouldReload;
-
-    ScrollBar64_t mScrollBarAttributes;
-
-    int getColumnDisplayIndexFromX(int x);
-    friend class ColumnReorderDialog;
-protected:
-    bool mAllowPainting;
-    bool mDrawDebugOnly;
-
+private slots:
     // Configuration
-    QColor backgroundColor;
-    QColor textColor;
-    QColor separatorColor;
-    QColor headerTextColor;
-    QColor selectionColor;
-    QString mViewName;
+    void updateColorsSlot();
+    void updateFontsSlot();
+    void updateShortcutsSlot();
+    void closeSlot();
 
-    // Font metrics
-    CachedFontMetrics* mFontMetrics;
-    void invalidateCachedFont();
-
-    //action helpers
 private:
-    struct ActionShortcut
-    {
-        QAction* action;
-        const char* shortcut;
+    GuiState mGuiState = NoState;
 
-        ActionShortcut(QAction* action, const char* shortcut)
-            : action(action),
-              shortcut(shortcut)
-        {
-        }
+    struct ColumnResizeState
+    {
+        bool splitHandle = false;
+        int index = -1;
+        int lastPosX = -1;
+    } mColResizeData;
+
+    struct HeaderButton
+    {
+        bool isClickable = false;
+        bool isPressed = false;
+        bool isMouseOver = false;
     };
 
-    std::vector<ActionShortcut> actionShortcutPairs;
-
-    inline QAction* connectAction(QAction* action, const char* slot)
+    struct Column
     {
-        connect(action, SIGNAL(triggered(bool)), this, slot);
-        return action;
-    }
+        int width = 0;
+        int paintedWidth = -1;
+        bool hidden = false;
+        HeaderButton header;
+        QString title;
+    };
 
-    inline QAction* connectAction(QAction* action, QActionLambda::TriggerCallback callback)
+    struct HeaderConfig
     {
-        auto lambda = new QActionLambda(action->parent(), callback);
-        connect(action, SIGNAL(triggered(bool)), lambda, SLOT(triggeredSlot()));
-        return action;
-    }
+        bool isVisible = true;
+        int height = 20;
+        int activeButtonIndex = -1;
+    } mHeader;
 
-    inline QAction* connectShortcutAction(QAction* action, const char* shortcut)
-    {
-        actionShortcutPairs.push_back(ActionShortcut(action, shortcut));
-        action->setShortcut(ConfigShortcut(shortcut));
-        action->setShortcutContext(Qt::WidgetShortcut);
-        addAction(action);
-        return action;
-    }
+    int mMinColumnWidth = 5;
+    QList<Column> mColumnList;
+    QList<duint> mColumnOrder;
+    int mReorderStartX = -1;
+    duint mHoveredColumnDisplayIndex = 0;
 
-    inline QAction* connectMenuAction(QMenu* menu, QAction* action)
+    duint mRowCount = 0;
+    duint mTableOffset = 0;
+    duint mPrevTableOffset = -1;
+    duint mNbrOfLineToPrint = 0;
+
+    bool mShouldReload = true;
+    bool mDrawDebugOnly = false;
+
+    // State for accumulating scroll events
+    enum ScrollDirection
     {
-        menu->addAction(action);
-        return action;
-    }
+        ScrollUnknown,
+        ScrollVertical,
+        ScrollHorizontal,
+    } mPixelScrollDirection = ScrollUnknown;
+    QPoint mPixelScrollDelta;
+    QPoint mAngleScrollDelta;
+
+    struct ScrollBarAttributes
+    {
+        bool is64 = false;
+        int rightShiftCount = 0;
+    } mScrollBarAttributes;
+
+    duint getColumnDisplayIndexFromX(int x);
+    friend class ColumnReorderDialog;
+
+    void updateLastColumnWidth();
 
 protected:
-    inline QMenu* makeMenu(const QString & title)
-    {
-        return new QMenu(title, this);
-    }
+    bool mAllowPainting = true;
 
-    inline QMenu* makeMenu(const QIcon & icon, const QString & title)
-    {
-        QMenu* menu = new QMenu(title, this);
-        menu->setIcon(icon);
-        return menu;
-    }
+    // Configuration
+    QColor mTextColor;
+    QColor mBackgroundColor;
+    QColor mHeaderTextColor;
+    QColor mHeaderBackgroundColor;
+    QColor mSeparatorColor;
+    QColor mSelectionColor;
+    QString mViewName; // TODO: this is needed during construction
 
-    template<typename T>
-    inline QAction* makeAction(const QString & text, T slot)
-    {
-        return connectAction(new QAction(text, this), slot);
-    }
+    // Font metrics
+    CachedFontMetrics* mFontMetrics = nullptr;
+    void invalidateCachedFont();
 
-    template<typename T>
-    inline QAction* makeAction(const QIcon & icon, const QString & text, T slot)
-    {
-        return connectAction(new QAction(icon, text, this), slot);
-    }
+    ColumnReorderDialog* mReorderDialog = nullptr;
 
-    template<typename T>
-    inline QAction* makeShortcutAction(const QString & text, T slot, const char* shortcut)
-    {
-        return connectShortcutAction(makeAction(text, slot), shortcut);
-    }
-
-    template<typename T>
-    inline QAction* makeShortcutAction(const QIcon & icon, const QString & text, T slot, const char* shortcut)
-    {
-        return connectShortcutAction(makeAction(icon, text, slot), shortcut);
-    }
-
-    template<typename T>
-    inline QAction* makeMenuAction(QMenu* menu, const QString & text, T slot)
-    {
-        return connectMenuAction(menu, makeAction(text, slot));
-    }
-
-    template<typename T>
-    inline QAction* makeMenuAction(QMenu* menu, const QIcon & icon, const QString & text, T slot)
-    {
-        return connectMenuAction(menu, makeAction(icon, text, slot));
-    }
-
-    template<typename T>
-    inline QAction* makeShortcutMenuAction(QMenu* menu, const QString & text, T slot, const char* shortcut)
-    {
-        return connectShortcutAction(makeMenuAction(menu, text, slot), shortcut);
-    }
-
-    template<typename T>
-    inline QAction* makeShortcutMenuAction(QMenu* menu, const QIcon & icon, const QString & text, T slot, const char* shortcut)
-    {
-        return connectShortcutAction(makeMenuAction(menu, icon, text, slot), shortcut);
-    }
+    friend class AccessibleAbstractTableView;
+    friend class AccessibleAbstractTableViewCell;
+    friend class AccessibleAbstractTableViewCellTitle;
+    void accessibilitySelectionChanged();
+    void accessibilityTableModelChanged();
+    void accessibilityNotifyTableModelChanged();
+    quint64 accessibilityModelRevision = 0;
+    bool accessibilityModelChangePending = false;
+    int accessibilitySelectedColumn; // display index excluding hidden columns
+    int accessibilityPreviousSelectedRow = -1;
+    int accessibilityPreviousSelectedColumn = -1;
+    virtual int accessibilitySelectedRow() const;
+    int accessibilityVisibleColumnCount() const;
+    void accessibilityMousePressSetColumn(QMouseEvent* event);
 };
-
-#endif // ABSTRACTTABLEVIEW_H

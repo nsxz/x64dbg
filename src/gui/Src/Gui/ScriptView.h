@@ -1,24 +1,26 @@
-#ifndef SCRIPTVIEW_H
-#define SCRIPTVIEW_H
+#pragma once
 
 #include "StdTable.h"
+
+class QMessageBox;
+class MRUList;
+class LineEditDialog;
 
 class ScriptView : public StdTable
 {
     Q_OBJECT
 public:
-    explicit ScriptView(StdTable* parent = 0);
+    explicit ScriptView(StdTable* parent = nullptr);
 
     // Configuration
-    void updateColors();
+    void updateColors() override;
 
     // Reimplemented Functions
-    QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h);
-    void mouseDoubleClickEvent(QMouseEvent* event);
-    void keyPressEvent(QKeyEvent* event);
+    QString paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
 
 public slots:
-    void refreshShortcutsSlot();
     void contextMenuSlot(const QPoint & pos);
     void add(int count, const char** lines);
     void clear();
@@ -26,9 +28,12 @@ public slots:
     void error(int line, QString message);
     void setTitle(QString title);
     void setInfoLine(int line, QString info);
+    void openRecentFile(QString file);
     void openFile();
+    void paste();
     void reload();
     void unload();
+    void edit();
     void run();
     void bpToggle();
     void runCursor();
@@ -39,29 +44,22 @@ public slots:
     void newIp();
     void question(QString message);
     void enableHighlighting(bool enable);
+    void messageResult(int result);
+    void shutdownSlot();
 
 private:
     //private functions
     void setupContextMenu();
     void setSelection(int line);
-    bool isScriptCommand(QString text, QString cmd);
+    bool isScriptCommand(QString text, QString cmd, QString & mnemonic, QString & argument);
 
     //private variables
     int mIpLine;
     bool mEnableSyntaxHighlighting;
     QString filename;
 
-    QMenu* mLoadMenu;
-    QAction* mScriptLoad;
-    QAction* mScriptReload;
-    QAction* mScriptUnload;
-    QAction* mScriptRun;
-    QAction* mScriptRunCursor;
-    QAction* mScriptStep;
-    QAction* mScriptBpToggle;
-    QAction* mScriptCmdExec;
-    QAction* mScriptAbort;
-    QAction* mScriptNewIp;
+    MenuBuilder* mMenu;
+    QMessageBox* msg;
+    MRUList* mMRUList;
+    LineEditDialog* mCmdLineEdit;
 };
-
-#endif // SCRIPTVIEW_H

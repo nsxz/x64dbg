@@ -5,11 +5,10 @@ ValidateExpressionThread::ValidateExpressionThread(QObject* parent) : QThread(pa
     this->mOnExpressionChangedCallback = nullptr;
 }
 
-void ValidateExpressionThread::start(QString initialValue)
+void ValidateExpressionThread::start()
 {
     mStopThread = false;
     QThread::start();
-    textChanged(initialValue);
 }
 
 void ValidateExpressionThread::stop()
@@ -38,6 +37,13 @@ void ValidateExpressionThread::textChanged(QString text)
     mExpressionMutex.unlock();
 }
 
+void ValidateExpressionThread::additionalStateChanged()
+{
+    mExpressionMutex.lock();
+    mExpressionChanged = true;
+    mExpressionMutex.unlock();
+}
+
 void ValidateExpressionThread::setOnExpressionChangedCallback(EXPRESSIONCHANGEDCB callback)
 {
     mOnExpressionChangedCallback = callback;
@@ -56,6 +62,6 @@ void ValidateExpressionThread::run()
         {
             mOnExpressionChangedCallback(expression);
         }
-        Sleep(50);
+        QThread::msleep(50);
     }
 }

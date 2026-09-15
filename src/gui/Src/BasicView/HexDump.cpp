@@ -3,35 +3,59 @@
 #include "Bridge.h"
 #include "StringUtil.h"
 #include <QMessageBox>
+#include <QFloat16>
+#include <QDebug>
+#include <QAccessible>
 
-HexDump::HexDump(QWidget* parent)
-    : AbstractTableView(parent)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#include <QStringDecoder>
+#else
+#include <QTextCodec>
+#endif // QT_VERSION
+
+static int getStringMaxLength(HexDump::DataDescriptor desc);
+static int byteStringMaxLength(HexDump::ByteViewMode mode);
+static int wordStringMaxLength(HexDump::WordViewMode mode);
+static int dwordStringMaxLength(HexDump::DwordViewMode mode);
+static int qwordStringMaxLength(HexDump::QwordViewMode mode);
+static int twordStringMaxLength(HexDump::TwordViewMode mode);
+
+HexDump::HexDump(Architecture* architecture, QWidget* parent, MemoryPage* memPage)
+    : AbstractTableView(parent),
+      mArchitecture(architecture)
 {
-    SelectionData_t data;
-    memset(&data, 0, sizeof(SelectionData_t));
-    mSelection = data;
+    setDrawDebugOnly(true);
 
     mGuiState = HexDump::NoState;
 
     setRowCount(0);
 
-    mMemPage = new MemoryPage(0, 0);
+    if(!memPage)
+        mMemPage = new MemoryPage(0, 0, this);
+    else
+        mMemPage = memPage;
     mForceColumn = -1;
 
     clearDescriptors();
 
-    backgroundColor = ConfigColor("HexDumpBackgroundColor");
-    textColor = ConfigColor("HexDumpTextColor");
-    selectionColor = ConfigColor("HexDumpSelectionColor");
+    mBackgroundColor = ConfigColor("HexDumpBackgroundColor");
+    mTextColor = ConfigColor("HexDumpTextColor");
+    mSelectionColor = ConfigColor("HexDumpSelectionColor");
 
     mRvaDisplayEnabled = false;
     mSyncAddrExpression = "";
+    mNonprintReplace = QChar('.'); //QChar(0x25CA);
+    mNullReplace = QChar('.'); //QChar(0x2022);
 
-    historyClear();
+    const auto updateCacheDataSize = 0x1000;
+    mUpdateCacheData.resize(updateCacheDataSize);
+    mUpdateCacheTemp.resize(updateCacheDataSize);
 
     // Slots
     connect(Bridge::getBridge(), SIGNAL(updateDump()), this, SLOT(updateDumpSlot()));
     connect(Bridge::getBridge(), SIGNAL(dbgStateChanged(DBGSTATE)), this, SLOT(debugStateChanged(DBGSTATE)));
+    connect(this, &HexDump::selectionUpdated, this, &HexDump::updateSelectionUnderline);
+    connect(this, SIGNAL(selectionUpdated()), this, SLOT(selectionChangedSlot()));
     setupCopyMenu();
 
     Initialize();
@@ -46,14 +70,54 @@ void HexDump::updateColors()
 {
     AbstractTableView::updateColors();
 
-    backgroundColor = ConfigColor("HexDumpBackgroundColor");
-    textColor = ConfigColor("HexDumpTextColor");
-    selectionColor = ConfigColor("HexDumpSelectionColor");
+    mBackgroundColor = ConfigColor("HexDumpBackgroundColor");
+    mTextColor = ConfigColor("HexDumpTextColor");
+    mSelectionColor = ConfigColor("HexDumpSelectionColor");
+
+    mModifiedBytesColor = ConfigColor("HexDumpModifiedBytesColor");
+    mModifiedBytesBackgroundColor = ConfigColor("HexDumpModifiedBytesBackgroundColor");
+    mRestoredBytesColor = ConfigColor("HexDumpRestoredBytesColor");
+    mRestoredBytesBackgroundColor = ConfigColor("HexDumpRestoredBytesBackgroundColor");
+    mByte00Color = ConfigColor("HexDumpByte00Color");
+    mByte00BackgroundColor = ConfigColor("HexDumpByte00BackgroundColor");
+    mByte7FColor = ConfigColor("HexDumpByte7FColor");
+    mByte7FBackgroundColor = ConfigColor("HexDumpByte7FBackgroundColor");
+    mByteFFColor = ConfigColor("HexDumpByteFFColor");
+    mByteFFBackgroundColor = ConfigColor("HexDumpByteFFBackgroundColor");
+    mByteIsPrintColor = ConfigColor("HexDumpByteIsPrintColor");
+    mByteIsPrintBackgroundColor = ConfigColor("HexDumpByteIsPrintBackgroundColor");
+
+    mUserModuleCodePointerHighlightColor = ConfigColor("HexDumpUserModuleCodePointerHighlightColor");
+    mUserModuleDataPointerHighlightColor = ConfigColor("HexDumpUserModuleDataPointerHighlightColor");
+    mSystemModuleCodePointerHighlightColor = ConfigColor("HexDumpSystemModuleCodePointerHighlightColor");
+    mSystemModuleDataPointerHighlightColor = ConfigColor("HexDumpSystemModuleDataPointerHighlightColor");
+    mUnknownCodePointerHighlightColor = ConfigColor("HexDumpUnknownCodePointerHighlightColor");
+    mUnknownDataPointerHighlightColor = ConfigColor("HexDumpUnknownDataPointerHighlightColor");
+
+    duint addressColorCount = ConfigUint("Colors", "AddressColorCount");
+    duint addressColorAlpha = ConfigUint("Colors", "AddressColorAlpha");
+    mAddressColorPresets.assign(addressColorCount + 1, QColor(Qt::transparent));
+    for(duint i = 0; i < addressColorCount; i++)
+    {
+        char addressColor[MAX_SETTING_SIZE] = "";
+        if(BridgeSettingGet("Colors", QString("AddressColor%1").arg(i).toUtf8().constData(), addressColor))
+        {
+            QColor color = QColor(addressColor);
+            color.setAlpha(addressColorAlpha);
+            mAddressColorPresets[i + 1] = color;
+        }
+    }
+
     reloadData();
 }
 
 void HexDump::updateFonts()
 {
+    duint setting;
+    if(BridgeSettingGetUint("Gui", "NonprintReplaceCharacter", &setting))
+        mNonprintReplace = QChar(uint(setting));
+    if(BridgeSettingGetUint("Gui", "NullReplaceCharacter", &setting))
+        mNullReplace = QChar(uint(setting));
     setFont(ConfigFont("HexDump"));
     invalidateCachedFont();
 }
@@ -62,6 +126,7 @@ void HexDump::updateShortcuts()
 {
     AbstractTableView::updateShortcuts();
     mCopyAddress->setShortcut(ConfigShortcut("ActionCopyAddress"));
+    mCopyRva->setShortcut(ConfigShortcut("ActionCopyRva"));
     mCopySelection->setShortcut(ConfigShortcut("ActionCopy"));
 }
 
@@ -76,6 +141,33 @@ void HexDump::updateDumpSlot()
             printDumpAt(syncAddr, false, false, true);
         }
     }
+    UpdateCache cur;
+    cur.memBase = mMemPage->getBase();
+    cur.memSize = mMemPage->getSize();
+    if(cur.memBase)
+    {
+        cur.rva = getTableOffsetRva();
+        cur.size = getBytePerRowCount() * getViewableRowsCount();
+        if(cur.size < mUpdateCacheData.size())
+        {
+            if(mMemPage->read(mUpdateCacheTemp.data(), cur.rva, cur.size))
+            {
+                if(mUpdateCache == cur && memcmp(mUpdateCacheData.data(), mUpdateCacheTemp.data(), cur.size) == 0)
+                {
+                    // same view and same data, do not reload
+                    return;
+                }
+                else
+                {
+                    mUpdateCache = cur;
+                    mUpdateCacheData.swap(mUpdateCacheTemp);
+#ifdef DEBUG
+                    OutputDebugStringA(QString("[x64dbg] %1[%2] %3[%4]").arg(ToPtrString(mUpdateCache.memBase)).arg(ToHexString(mUpdateCache.memSize)).arg(ToPtrString(mUpdateCache.rva)).arg(ToHexString(mUpdateCache.size)).toUtf8().constData());
+#endif // DEBUG
+                }
+            }
+        }
+    }
     reloadData();
 }
 
@@ -84,120 +176,203 @@ void HexDump::copySelectionSlot()
     Bridge::CopyToClipboard(makeCopyText());
 }
 
-void HexDump::printDumpAt(dsint parVA, bool select, bool repaint, bool updateTableOffset)
+void HexDump::printDumpAt(duint parVA, bool select, bool repaint, bool updateTableOffset)
 {
-    dsint wBase = DbgMemFindBaseAddr(parVA, 0); //get memory base
-    dsint wSize = DbgMemGetPageSize(wBase); //get page size
-    if(!wBase || !wSize)
+    duint size = 0;
+    auto base = DbgMemFindBaseAddr(parVA, &size); //get memory base
+    if(size == 0)
         return;
-    dsint wRVA = parVA - wBase; //calculate rva
-    int wBytePerRowCount = getBytePerRowCount(); //get the number of bytes per row
-    dsint wRowCount;
+    auto rva = parVA - base; //calculate rva
+    auto bytePerRowCount = getBytePerRowCount(); //get the number of bytes per row
 
     // Byte offset used to be aligned on the given RVA
-    mByteOffset = (int)((dsint)wRVA % (dsint)wBytePerRowCount);
-    mByteOffset = mByteOffset > 0 ? wBytePerRowCount - mByteOffset : 0;
+    // TODO: check this logic
+    mByteOffset = (dsint)rva % (dsint)bytePerRowCount;
+    mByteOffset = mByteOffset > 0 ? (dsint)bytePerRowCount - mByteOffset : 0;
 
     // Compute row count
-    wRowCount = wSize / wBytePerRowCount;
-    wRowCount += mByteOffset > 0 ? 1 : 0;
+    auto rowCount = (size + bytePerRowCount - 1) / bytePerRowCount;
+    rowCount += mByteOffset > 0 ? 1 : 0;
 
     if(mRvaDisplayEnabled && mMemPage->getBase() != mRvaDisplayPageBase)
         mRvaDisplayEnabled = false;
 
-    setRowCount(wRowCount); //set the number of rows
+    setRowCount(rowCount); //set the number of rows
 
-    mMemPage->setAttributes(wBase, wSize);  // Set base and size (Useful when memory page changed)
+    mMemPage->setAttributes(base, size);  // Set base and size (Useful when memory page changed)
 
     if(updateTableOffset)
     {
         setTableOffset(-1); //make sure the requested address is always first
-        setTableOffset((wRVA + mByteOffset) / wBytePerRowCount); //change the displayed offset
+        setTableOffset((rva + mByteOffset) / bytePerRowCount); //change the displayed offset
     }
 
     if(select)
     {
-        setSingleSelection(wRVA);
-        dsint wEndingAddress = wRVA + getSizeOf(mDescriptor.at(0).data.itemSize) - 1;
-        expandSelectionUpTo(wEndingAddress);
+        setSingleSelection(rva);
+        auto endingAddress = rva + getSizeOf(mDescriptor.at(0).data.itemSize) - 1;
+        expandSelectionUpTo(endingAddress);
     }
 
     if(repaint)
         reloadData();
 }
 
-void HexDump::printDumpAt(dsint parVA)
+void HexDump::printDumpAt(duint parVA)
 {
     printDumpAt(parVA, true);
 }
 
-duint HexDump::rvaToVa(dsint rva)
+void HexDump::gotoPreviousSlot()
+{
+    printDumpAt(mHistory.historyPrev());
+}
+
+void HexDump::gotoNextSlot()
+{
+    printDumpAt(mHistory.historyNext());
+}
+
+void HexDump::updateSelectionUnderline()
+{
+    mUnderlineRanges.clear();
+
+    duint viewStart = getTableOffset() * getBytePerRowCount();
+    duint viewSize = getViewableRowsCount() * getBytePerRowCount();
+    duint viewEnd = viewStart + viewSize;
+
+    duint selectionSize = mSelection.toIndex - mSelection.fromIndex + 1;
+    if(selectionSize > viewSize)
+    {
+        qDebug() << "Selection too big for highlighting!";
+        return;
+    }
+
+    std::vector<uint8_t> pattern(selectionSize);
+    if(!mMemPage->read(pattern.data(), mSelection.fromIndex, pattern.size()))
+    {
+        qDebug() << "Failed to read memory";
+        return;
+    }
+
+    dsint scanRva = viewStart - pattern.size();
+    duint scanSize = viewSize + pattern.size() * 2;
+
+    if(scanRva < 0)
+    {
+        duint adjust = -scanRva;
+        scanRva += adjust;
+        scanSize -= adjust;
+    }
+
+    duint endRva = mMemPage->getBase() + mMemPage->getSize();
+    if(scanRva + scanSize > endRva)
+    {
+        duint adjust = scanRva + scanSize - endRva;
+        scanSize -= adjust;
+    }
+
+    if(scanSize < pattern.size())
+    {
+        qDebug() << "data too small for highlighting (should not be possible)";
+        return;
+    }
+
+
+    mUnderlineBuffer.resize(scanSize);
+    if(!mMemPage->read(mUnderlineBuffer.data(), scanRva, scanSize))
+    {
+        qDebug() << "failed to read highlight scan buffer";
+        return;
+    }
+
+    for(size_t i = 0; i < scanSize - pattern.size(); i++)
+    {
+        duint hcur = scanRva + i;
+        if(memcmp(pattern.data(), mUnderlineBuffer.data() + i, pattern.size()) == 0)
+        {
+            if(hcur < mSelection.fromIndex || hcur >= mSelection.fromIndex + selectionSize)
+            {
+                mUnderlineRanges.emplace_back(hcur, pattern.size());
+                i += pattern.size() - 1;
+            }
+        }
+    }
+}
+
+void HexDump::prepareData()
+{
+    AbstractTableView::prepareData();
+    if(mSelectionUnderliningEnabled && mMemPage->getSize() > 0)
+    {
+        updateSelectionUnderline();
+    }
+}
+
+duint HexDump::rvaToVa(duint rva) const
 {
     return mMemPage->va(rva);
 }
 
-duint HexDump::getTableOffsetRva()
+duint HexDump::getTableOffsetRva() const
 {
     return getTableOffset() * getBytePerRowCount() - mByteOffset;
 }
 
-QString HexDump::makeAddrText(duint va)
+QString HexDump::makeAddrText(duint va) const
 {
+    bool addr64 = mArchitecture->addr64();
     char label[MAX_LABEL_SIZE] = "";
     QString addrText = "";
-    dsint cur_addr = va;
     if(mRvaDisplayEnabled) //RVA display
     {
-        dsint rva = cur_addr - mRvaDisplayBase;
-        if(rva == 0)
+        dsint displayRva = va - mRvaDisplayBase;
+        if(displayRva == 0)
         {
-#ifdef _WIN64
-            addrText = "$ ==>            ";
-#else
-            addrText = "$ ==>    ";
-#endif //_WIN64
+            if(addr64)
+                addrText = "$ ==>            ";
+            else
+                addrText = "$ ==>    ";
         }
-        else if(rva > 0)
+        else if(displayRva > 0)
         {
-#ifdef _WIN64
-            addrText = "$+" + QString("%1").arg(rva, -15, 16, QChar(' ')).toUpper();
-#else
-            addrText = "$+" + QString("%1").arg(rva, -7, 16, QChar(' ')).toUpper();
-#endif //_WIN64
+            if(addr64)
+                addrText = "$+" + QString("%1").arg(displayRva, -15, 16, QChar(' ')).toUpper();
+            else
+                addrText = "$+" + QString("%1").arg(displayRva, -7, 16, QChar(' ')).toUpper();
         }
-        else if(rva < 0)
+        else if(displayRva < 0)
         {
-#ifdef _WIN64
-            addrText = "$-" + QString("%1").arg(-rva, -15, 16, QChar(' ')).toUpper();
-#else
-            addrText = "$-" + QString("%1").arg(-rva, -7, 16, QChar(' ')).toUpper();
-#endif //_WIN64
+            if(addr64)
+                addrText = "$-" + QString("%1").arg(-displayRva, -15, 16, QChar(' ')).toUpper();
+            else
+                addrText = "$-" + QString("%1").arg(-displayRva, -7, 16, QChar(' ')).toUpper();
         }
     }
-    addrText += ToPtrString(cur_addr);
-    if(DbgGetLabelAt(cur_addr, SEG_DEFAULT, label)) //has label
+    addrText += ToPtrString(va);
+    if(DbgGetLabelAt(va, SEG_DEFAULT, label)) //has label
     {
         char module[MAX_MODULE_SIZE] = "";
-        if(DbgGetModuleAt(cur_addr, module) && !QString(label).startsWith("JMP.&"))
+        if(DbgGetModuleAt(va, module) && !QString(label).startsWith("JMP.&"))
             addrText += " <" + QString(module) + "." + QString(label) + ">";
         else
             addrText += " <" + QString(label) + ">";
     }
     else
         *label = 0;
-    return addrText;
+    return std::move(addrText);
 }
 
-QString HexDump::makeCopyText()
+QString HexDump::makeCopyText() const
 {
-    dsint deltaRowBase = getSelectionStart() % getBytePerRowCount() + mByteOffset;
+    auto deltaRowBase = getSelectionStart() % getBytePerRowCount() + mByteOffset;
     if(deltaRowBase >= getBytePerRowCount())
         deltaRowBase -= getBytePerRowCount();
     auto curRow = getSelectionStart() - deltaRowBase;
     QString result;
     while(curRow <= getSelectionEnd())
     {
-        for(int col = 0; col < getColumnCount(); col++)
+        for(duint col = 0; col < getColumnCount(); col++)
         {
             if(col)
                 result += " ";
@@ -214,82 +389,33 @@ QString HexDump::makeCopyText()
         curRow += getBytePerRowCount();
         result += "\n";
     }
-    return result;
-}
-
-void HexDump::addVaToHistory(dsint parVa)
-{
-    //truncate everything right from the current VA
-    if(mVaHistory.size() && mCurrentVa < mVaHistory.size() - 1) //mCurrentVa is not the last
-        mVaHistory.erase(mVaHistory.begin() + mCurrentVa + 1, mVaHistory.end());
-
-    //do not have 2x the same va in a row
-    if(!mVaHistory.size() || mVaHistory.last() != parVa)
-    {
-        mCurrentVa++;
-        mVaHistory.push_back(parVa);
-    }
-}
-
-bool HexDump::historyHasPrev()
-{
-    if(!mCurrentVa || !mVaHistory.size()) //we are at the earliest history entry
-        return false;
-    return true;
-}
-
-bool HexDump::historyHasNext()
-{
-    int size = mVaHistory.size();
-    if(!size || mCurrentVa >= mVaHistory.size() - 1) //we are at the newest history entry
-        return false;
-    return true;
-}
-
-void HexDump::historyPrev()
-{
-    if(!historyHasPrev())
-        return;
-    mCurrentVa--;
-    printDumpAt(mVaHistory.at(mCurrentVa));
-}
-
-void HexDump::historyNext()
-{
-    if(!historyHasNext())
-        return;
-    mCurrentVa++;
-    printDumpAt(mVaHistory.at(mCurrentVa));
-}
-
-void HexDump::historyClear()
-{
-    mCurrentVa = -1;
-    mVaHistory.clear();
+    return std::move(result);
 }
 
 void HexDump::setupCopyMenu()
 {
     // Copy -> Data
-    mCopySelection = new QAction(tr("&Selection"), this);
+    mCopySelection = new QAction(DIcon("copy_selection"), tr("&Selected lines"), this);
     connect(mCopySelection, SIGNAL(triggered(bool)), this, SLOT(copySelectionSlot()));
     mCopySelection->setShortcutContext(Qt::WidgetShortcut);
     addAction(mCopySelection);
 
     // Copy -> Address
-    mCopyAddress = new QAction(tr("&Address"), this);
+    mCopyAddress = new QAction(DIcon("copy_address"), tr("&Address"), this);
     connect(mCopyAddress, SIGNAL(triggered()), this, SLOT(copyAddressSlot()));
     mCopyAddress->setShortcutContext(Qt::WidgetShortcut);
     addAction(mCopyAddress);
 
     // Copy -> RVA
-    mCopyRva = new QAction("&RVA", this);
+    mCopyRva = new QAction(DIcon("copy_address"), "&RVA", this);
     connect(mCopyRva, SIGNAL(triggered()), this, SLOT(copyRvaSlot()));
+    mCopyRva->setShortcutContext(Qt::WidgetShortcut);
+    addAction(mCopyRva);
 }
 
 void HexDump::copyAddressSlot()
 {
-    QString addrText = QString("%1").arg(rvaToVa(getInitialSelection()), sizeof(dsint) * 2, 16, QChar('0')).toUpper();
+    QString addrText = ToPtrString(rvaToVa(getInitialSelection()));
     Bridge::CopyToClipboard(addrText);
 }
 
@@ -299,16 +425,16 @@ void HexDump::copyRvaSlot()
     duint base = DbgFunctions()->ModBaseFromAddr(addr);
     if(base)
     {
-        QString addrText = QString("%1").arg(addr - base, 0, 16, QChar('0')).toUpper();
+        QString addrText = ToHexString(addr - base);
         Bridge::CopyToClipboard(addrText);
     }
     else
-        QMessageBox::warning(this, "Error!", "Selection not in a module...");
+        QMessageBox::warning(this, tr("Error!"), tr("Selection not in a module..."));
 }
 
 void HexDump::mouseMoveEvent(QMouseEvent* event)
 {
-    bool wAccept = true;
+    bool accept = true;
 
     int x = event->x();
     int y = event->y();
@@ -319,45 +445,74 @@ void HexDump::mouseMoveEvent(QMouseEvent* event)
 
         if((transY(y) >= 0) && y <= this->height())
         {
-            for(int wI = 1; wI < getColumnCount(); wI++)    // Skip first column (Addresses)
+            auto colIndex = getColumnIndexFromX(x);
+
+            if(mForceColumn != -1)
             {
-                int wColIndex = getColumnIndexFromX(x);
+                colIndex = mForceColumn;
+                x = getColumnPosition(mForceColumn) + 1;
+            }
 
-                if(mForceColumn != -1)
+            if(colIndex > 0) // No selection for first column (addresses)
+            {
+                auto startingAddress = getItemStartingAddress(x, y);
+                auto dataSize = getSizeOf(mDescriptor.at(colIndex - 1).data.itemSize) - 1;
+                auto endingAddress = startingAddress + dataSize;
+
+                if(endingAddress < mMemPage->getSize())
                 {
-                    wColIndex = mForceColumn;
-                    x = getColumnPosition(mForceColumn) + 1;
-                }
-
-                if(wColIndex > 0) // No selection for first column (addresses)
-                {
-                    dsint wStartingAddress = getItemStartingAddress(x, y);
-                    dsint dataSize = getSizeOf(mDescriptor.at(wColIndex - 1).data.itemSize) - 1;
-                    dsint wEndingAddress = wStartingAddress + dataSize;
-
-                    if(wEndingAddress < (dsint)mMemPage->getSize())
+                    if(startingAddress < getInitialSelection())
                     {
-                        if(wStartingAddress < getInitialSelection())
-                        {
-                            expandSelectionUpTo(wStartingAddress);
-                            mSelection.toIndex += dataSize;
-                            emit selectionUpdated();
-                        }
-                        else
-                            expandSelectionUpTo(wEndingAddress);
-
-                        mGuiState = HexDump::MultiRowsSelectionState;
-
-                        updateViewport();
+                        expandSelectionUpTo(startingAddress);
+                        mSelection.toIndex += dataSize;
+                        emit selectionUpdated();
                     }
+                    else
+                        expandSelectionUpTo(endingAddress);
+
+                    mGuiState = HexDump::MultiRowsSelectionState;
+
+                    // TODO: only update if the selection actually changed
+                    updateViewport();
+                }
+            }
+            else
+            {
+                auto startingAddress = getItemStartingAddress(getColumnPosition(1) + 1, y);
+                auto dataSize = getSizeOf(mDescriptor.at(0).data.itemSize) * mDescriptor.at(0).itemCount - 1;
+                auto endingAddress = startingAddress + dataSize;
+
+                if(endingAddress < mMemPage->getSize())
+                {
+                    if(startingAddress < getInitialSelection())
+                    {
+                        expandSelectionUpTo(startingAddress);
+                        mSelection.toIndex += dataSize;
+                        emit selectionUpdated();
+                    }
+                    else
+                        expandSelectionUpTo(endingAddress);
+
+                    mGuiState = HexDump::MultiRowsSelectionState;
+
+                    // TODO: only update if the selection actually changed
+                    updateViewport();
                 }
             }
 
-            wAccept = true;
+            accept = true;
+        }
+        else if(y > this->height() && mGuiState == HexDump::MultiRowsSelectionState)
+        {
+            verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+        }
+        else if(transY(y) < 0 && mGuiState == HexDump::MultiRowsSelectionState)
+        {
+            verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepSub);
         }
     }
 
-    if(wAccept == true)
+    if(accept)
         AbstractTableView::mouseMoveEvent(event);
 }
 
@@ -367,8 +522,8 @@ void HexDump::mousePressEvent(QMouseEvent* event)
     {
         if(!DbgIsDebugging())
             return;
-        MessageBeep(MB_OK);
-        QString addrText = QString("%1").arg(rvaToVa(getInitialSelection()), sizeof(dsint) * 2, 16, QChar('0')).toUpper();
+        QApplication::beep();
+        QString addrText = ToPtrString(rvaToVa(getInitialSelection()));
         Bridge::CopyToClipboard(addrText);
         return;
     }
@@ -377,7 +532,7 @@ void HexDump::mousePressEvent(QMouseEvent* event)
     int x = event->x();
     int y = event->y();
 
-    bool wAccept = false;
+    bool accept = false;
 
     if(((event->buttons() & Qt::LeftButton) != 0) && ((event->buttons() & Qt::RightButton) == 0))
     {
@@ -385,31 +540,31 @@ void HexDump::mousePressEvent(QMouseEvent* event)
         {
             if(y > getHeaderHeight() && y <= this->height())
             {
-                int wColIndex = getColumnIndexFromX(x);
+                auto colIndex = getColumnIndexFromX(x);
 
                 if(mForceColumn != -1)
                 {
-                    wColIndex = mForceColumn;
+                    colIndex = mForceColumn;
                     x = getColumnPosition(mForceColumn) + 1;
                 }
 
-                if(wColIndex > 0 && mDescriptor.at(wColIndex - 1).isData == true) // No selection for first column (addresses) and no data columns
+                if(colIndex > 0 && mDescriptor.at(colIndex - 1).isData) // No selection for first column (addresses) and no data columns
                 {
-                    dsint wStartingAddress = getItemStartingAddress(x, y);
-                    dsint dataSize = getSizeOf(mDescriptor.at(wColIndex - 1).data.itemSize) - 1;
-                    dsint wEndingAddress = wStartingAddress + dataSize;
+                    auto startingAddress = getItemStartingAddress(x, y);
+                    auto dataSize = getSizeOf(mDescriptor.at(colIndex - 1).data.itemSize) - 1;
+                    auto endingAddress = startingAddress + dataSize;
 
-                    if(wEndingAddress < (dsint)mMemPage->getSize())
+                    if(endingAddress < mMemPage->getSize())
                     {
                         bool bUpdateTo = false;
                         if(!(event->modifiers() & Qt::ShiftModifier))
-                            setSingleSelection(wStartingAddress);
-                        else if(getInitialSelection() > wEndingAddress)
+                            setSingleSelection(startingAddress);
+                        else if(getInitialSelection() > endingAddress)
                         {
-                            wEndingAddress -= dataSize;
+                            endingAddress -= dataSize;
                             bUpdateTo = true;
                         }
-                        expandSelectionUpTo(wEndingAddress);
+                        expandSelectionUpTo(endingAddress);
                         if(bUpdateTo)
                         {
                             mSelection.toIndex += dataSize;
@@ -418,22 +573,54 @@ void HexDump::mousePressEvent(QMouseEvent* event)
 
                         mGuiState = HexDump::MultiRowsSelectionState;
 
+                        // TODO: only update if the selection actually changed
                         updateViewport();
+                        accessibilityMousePressSetColumn(event);
+                    }
+                }
+                else if(colIndex == 0)
+                {
+                    auto startingAddress = getItemStartingAddress(getColumnPosition(1) + 1, y);
+                    auto dataSize = getSizeOf(mDescriptor.at(0).data.itemSize) * mDescriptor.at(0).itemCount - 1;
+                    auto endingAddress = startingAddress + dataSize;
+
+                    if(endingAddress < mMemPage->getSize())
+                    {
+                        bool bUpdateTo = false;
+                        if((event->modifiers() & Qt::ShiftModifier) == 0)
+                            setSingleSelection(startingAddress);
+                        else if(getInitialSelection() > endingAddress)
+                        {
+                            endingAddress -= dataSize;
+                            bUpdateTo = true;
+                        }
+                        expandSelectionUpTo(endingAddress);
+                        if(bUpdateTo)
+                        {
+                            mSelection.toIndex += dataSize;
+                            emit selectionUpdated();
+                        }
+
+                        mGuiState = HexDump::MultiRowsSelectionState;
+
+                        // TODO: only update if the selection actually changed
+                        updateViewport();
+                        accessibilityMousePressSetColumn(event);
                     }
                 }
 
-                wAccept = true;
+                accept = true;
             }
         }
     }
 
-    if(wAccept == false)
+    if(!accept)
         AbstractTableView::mousePressEvent(event);
 }
 
 void HexDump::mouseReleaseEvent(QMouseEvent* event)
 {
-    bool wAccept = true;
+    bool accept = true;
 
     if((event->buttons() & Qt::LeftButton) == 0)
     {
@@ -441,63 +628,282 @@ void HexDump::mouseReleaseEvent(QMouseEvent* event)
         {
             mGuiState = HexDump::NoState;
 
-            updateViewport();
-
-            wAccept = false;
+            accept = false;
         }
     }
+    if((event->button() & Qt::BackButton) != 0) //Go to previous/next history
+    {
+        accept = true;
+        printDumpAt(mHistory.historyPrev());
+    }
+    else if((event->button() & Qt::ForwardButton) != 0)
+    {
+        accept = true;
+        printDumpAt(mHistory.historyNext());
+    }
 
-    if(wAccept == true)
+    if(accept)
         AbstractTableView::mouseReleaseEvent(event);
 }
 
-QString HexDump::paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h)
+void HexDump::wheelEvent(QWheelEvent* event)
+{
+    if(event->modifiers() == Qt::NoModifier)
+        AbstractTableView::wheelEvent(event);
+    else if(event->modifiers() == Qt::ControlModifier) // Zoom
+        Config()->zoomFont("HexDump", event);
+}
+
+void HexDump::keyPressEvent(QKeyEvent* event)
+{
+    int key = event->key();
+    auto selStart = getInitialSelection();
+    dsint granularity = 1; //Size of a data word.
+    dsint action = 0; //Where to scroll the scrollbar
+    Qt::KeyboardModifiers modifiers = event->modifiers();
+    for(int i = 0; i < mDescriptor.size(); i++) //Find the first data column
+    {
+        if(mDescriptor.at(i).isData)
+        {
+            granularity = getSizeOf(mDescriptor.at(i).data.itemSize);
+            break;
+        }
+    }
+    if(modifiers == Qt::NoModifier)
+    {
+        auto firstVisibleSelection = [this]()
+        {
+            dsint rva = dsint(getTableOffset()) * dsint(getBytePerRowCount()) - mByteOffset;
+            return rva > 0 ? duint(rva) : 0;
+        };
+        auto lastValidSelection = [this]()
+        {
+            return mMemPage->getSize() ? mMemPage->getSize() - 1 : 0;
+        };
+
+        //selStart -= selStart % granularity; //Align the selection to word boundary. TODO: Unaligned data?
+        switch(key)
+        {
+        case Qt::Key_Left:
+        {
+            selStart -= granularity;
+            if(0 <= selStart)
+                action = -1;
+        }
+        break;
+        case Qt::Key_Right:
+        {
+            selStart += granularity;
+            if(mMemPage->getSize() > selStart)
+                action = 1;
+        }
+        break;
+        case Qt::Key_Up:
+        {
+            selStart -= getBytePerRowCount();
+            if(0 <= selStart)
+                action = -1;
+        }
+        break;
+        case Qt::Key_Down:
+        {
+            selStart += getBytePerRowCount();
+            if(mMemPage->getSize() > selStart)
+                action = 1;
+        }
+        break;
+        case Qt::Key_PageUp:
+        {
+            AbstractTableView::keyPressEvent(event);
+            if(mMemPage->getSize())
+            {
+                selStart = firstVisibleSelection();
+                if(selStart > lastValidSelection())
+                    selStart = lastValidSelection();
+                action = -2;
+            }
+        }
+        break;
+        case Qt::Key_PageDown:
+        {
+            AbstractTableView::keyPressEvent(event);
+            if(mMemPage->getSize())
+            {
+                auto viewableRows = getViewableRowsCount();
+                auto lastVisibleRva = firstVisibleSelection();
+                if(viewableRows > 1)
+                    lastVisibleRva += (viewableRows - 1) * getBytePerRowCount();
+                selStart = lastVisibleRva;
+                if(selStart > lastValidSelection())
+                    selStart = lastValidSelection();
+                action = 2;
+            }
+        }
+        break;
+        default:
+            AbstractTableView::keyPressEvent(event);
+        }
+
+        if(action != 0)
+        {
+            //Check if selection is out of viewport. Step the scrollbar if necessary. (TODO)
+            if(action == 1 && selStart >= getViewableRowsCount() * getBytePerRowCount() + getTableOffsetRva())
+                verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+            else if(action == -1 && selStart < getTableOffsetRva())
+                verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepSub);
+            setSingleSelection(selStart);
+            if(granularity > 1)
+            {
+                auto selectionEnd = selStart + granularity - 1;
+                auto lastSelection = lastValidSelection();
+                if(selectionEnd > lastSelection)
+                    selectionEnd = lastSelection;
+                expandSelectionUpTo(selectionEnd);
+            }
+            reloadData();
+            if(QAccessible::isActive())
+            {
+                QAccessibleInterface* iface = QAccessible::queryAccessibleInterface(this);
+                if(iface)
+                {
+                    QAccessibleTableInterface* tface = (QAccessibleTableInterface*)iface->interface_cast(QAccessible::TableInterface);
+                    if(tface)
+                    {
+                        if(key == Qt::Key_Left && accessibilitySelectedColumn > 0)
+                        {
+                            accessibilitySelectedColumn--;
+                        }
+                        else if(key == Qt::Key_Right && accessibilitySelectedColumn < tface->columnCount() - 1)
+                        {
+                            accessibilitySelectedColumn++;
+                        }
+                    }
+                }
+                accessibilitySelectionChanged();
+            }
+        }
+    }
+    else if(modifiers == Qt::ControlModifier || modifiers == (Qt::ControlModifier | Qt::AltModifier))
+    {
+        duint offsetVa = rvaToVa(getTableOffsetRva());
+        switch(key)
+        {
+        case Qt::Key_Left:
+            action = (modifiers & Qt::AltModifier) ? -1 : -granularity;
+            break;
+        case Qt::Key_Right:
+            action = (modifiers & Qt::AltModifier) ? 1 : granularity;
+            break;
+        case Qt::Key_Up:
+            action = 0;
+            verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepSub);
+            break;
+        case Qt::Key_Down:
+            action = 0;
+            verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+            break;
+        default:
+            AbstractTableView::keyPressEvent(event);
+        }
+        if(action != 0)
+        {
+            offsetVa += action;
+            if(mMemPage->inRange(offsetVa))
+                printDumpAt(offsetVa, false);
+        }
+    }
+    else if(modifiers == Qt::ShiftModifier)
+    {
+        //TODO
+    }
+    else
+    {
+        AbstractTableView::keyPressEvent(event);
+    }
+    /*
+        Let's keep the old code for a while until nobody remembers previous behaviour.
+        if(key == Qt::Key_Left || (key == Qt::Key_Up && control)) //TODO: see if Ctrl+Up is redundant
+        {
+            duint offsetVa = rvaToVa(getTableOffsetRva()) - 1;
+            if(mMemPage->inRange(offsetVa))
+                printDumpAt(offsetVa, false);
+        }
+        else if(key == Qt::Key_Right || (key == Qt::Key_Down && control)) //TODO: see if Ctrl+Down is redundant
+        {
+            duint offsetVa = rvaToVa(getTableOffsetRva()) + 1;
+            if(mMemPage->inRange(offsetVa))
+                printDumpAt(offsetVa, false);
+        }
+        else
+            AbstractTableView::keyPressEvent(event);
+    */
+}
+
+QString HexDump::paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h)
 {
     // Reset byte offset when base address is reached
-    if(rowBase == 0 && mByteOffset != 0)
+    // TODO: wtf?
+    if(getTableOffset() == 0 && mByteOffset != 0)
         printDumpAt(mMemPage->getBase(), false, false);
 
     // Compute RVA
-    int wBytePerRowCount = getBytePerRowCount();
-    dsint wRva = (rowBase + rowOffset) * wBytePerRowCount - mByteOffset;
+    auto bytePerRowCount = getBytePerRowCount();
+    auto rva = row * bytePerRowCount - mByteOffset;
 
     if(col && mDescriptor.at(col - 1).isData)
-        printSelected(painter, rowBase, rowOffset, col, x, y, w, h);
+        printBackground(painter, row, col, x, y, w, h);
 
     RichTextPainter::List richText;
-    getColumnRichText(col, wRva, richText);
+    getColumnRichText(col, rva, richText);
     RichTextPainter::paintRichText(painter, x, y, w, h, 4, richText, mFontMetrics);
 
-    return "";
+    return QString();
 }
 
-void HexDump::printSelected(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h)
+void HexDump::printBackground(QPainter* painter, duint row, duint col, int x, int y, int w, int h)
 {
-    if((col > 0) && ((col - 1) < mDescriptor.size()))
+    if(col > 0 && col <= (duint)mDescriptor.size())
     {
-        ColumnDescriptor_t curDescriptor = mDescriptor.at(col - 1);
-        int wBytePerRowCount = getBytePerRowCount();
-        dsint wRva = (rowBase + rowOffset) * wBytePerRowCount - mByteOffset;
-        int wItemPixWidth = getItemPixelWidth(curDescriptor);
-        int wCharWidth = getCharWidth();
-        if(wItemPixWidth == wCharWidth)
+        ColumnDescriptor curDescriptor = mDescriptor.at(col - 1);
+        auto bytePerRowCount = getBytePerRowCount();
+        duint rva = row * bytePerRowCount - mByteOffset;
+        int itemPixWidth = getItemPixelWidth(curDescriptor);
+        int charWidth = getCharWidth();
+        if(itemPixWidth == charWidth)
             x += 4;
 
         for(int i = 0; i < curDescriptor.itemCount; i++)
         {
-            int wSelectionX = x + i * wItemPixWidth;
-            if(isSelected(wRva + i * getSizeOf(curDescriptor.data.itemSize)) == true)
+            int selectionX = x + i * itemPixWidth;
+            duint itemRva = rva + i * getSizeOf(curDescriptor.data.itemSize);
+            int selectionWidth = itemPixWidth > w - (selectionX - x) ? w - (selectionX - x) : itemPixWidth;
+            selectionWidth = selectionWidth < 0 ? 0 : selectionWidth;
+            painter->setPen(mTextColor);
+
+            QColor backgroundColor = mBackgroundColor;
+            if(isSelected(itemRva))
+                backgroundColor = mSelectionColor;
+
+            unsigned int linePreset;
+            if(DbgGetAddressColorAt(rvaToVa(itemRva), &linePreset) && linePreset < mAddressColorPresets.size())
             {
-                int wSelectionWidth = wItemPixWidth > w - (wSelectionX - x) ? w - (wSelectionX - x) : wItemPixWidth;
-                wSelectionWidth = wSelectionWidth < 0 ? 0 : wSelectionWidth;
-                painter->setPen(textColor);
-                painter->fillRect(QRect(wSelectionX, y, wSelectionWidth, h), QBrush(selectionColor));
+                const QColor & color = mAddressColorPresets[linePreset];
+                backgroundColor = QColor(
+                                      (backgroundColor.red()   * (255 - color.alpha()) + color.red()   * color.alpha()) / 255,
+                                      (backgroundColor.green() * (255 - color.alpha()) + color.green() * color.alpha()) / 255,
+                                      (backgroundColor.blue()  * (255 - color.alpha()) + color.blue()  * color.alpha()) / 255,
+                                      backgroundColor.alpha()
+                                  );
             }
+
+            painter->setPen(mTextColor);
+            painter->fillRect(QRect(selectionX, y, selectionWidth, h), QBrush(backgroundColor));
+
             int separator = curDescriptor.separator;
             if(i && separator && !(i % separator))
             {
-                painter->setPen(separatorColor);
-                painter->drawLine(wSelectionX, y, wSelectionX, y + h);
+                painter->setPen(mSeparatorColor);
+                painter->drawLine(selectionX, y, selectionX, y + h);
             }
         }
     }
@@ -506,7 +912,7 @@ void HexDump::printSelected(QPainter* painter, dsint rowBase, int rowOffset, int
 /************************************************************************************
                                 Selection Management
 ************************************************************************************/
-void HexDump::expandSelectionUpTo(dsint rva)
+void HexDump::expandSelectionUpTo(duint rva)
 {
     if(rva < mSelection.firstSelectedIndex)
     {
@@ -526,7 +932,7 @@ void HexDump::expandSelectionUpTo(dsint rva)
     }
 }
 
-void HexDump::setSingleSelection(dsint rva)
+void HexDump::setSingleSelection(duint rva)
 {
     mSelection.firstSelectedIndex = rva;
     mSelection.fromIndex = rva;
@@ -534,60 +940,77 @@ void HexDump::setSingleSelection(dsint rva)
     emit selectionUpdated();
 }
 
-dsint HexDump::getInitialSelection()
+duint HexDump::getInitialSelection() const
 {
     return mSelection.firstSelectedIndex;
 }
 
-dsint HexDump::getSelectionStart()
+duint HexDump::getSelectionStart() const
 {
     return mSelection.fromIndex;
 }
 
-dsint HexDump::getSelectionEnd()
+duint HexDump::getSelectionEnd() const
 {
     return mSelection.toIndex;
 }
 
-bool HexDump::isSelected(dsint rva)
+bool HexDump::isSelected(duint rva) const
 {
-    if(rva >= mSelection.fromIndex && rva <= mSelection.toIndex)
-        return true;
-    else
-        return false;
+    return rva >= mSelection.fromIndex && rva <= mSelection.toIndex;
 }
 
-void HexDump::getColumnRichText(int col, dsint rva, RichTextPainter::List & richText)
+void HexDump::getColumnRichText(duint col, duint rva, RichTextPainter::List & richText) const
 {
     RichTextPainter::CustomRichText_t curData;
-    curData.highlight = false;
-    curData.flags = RichTextPainter::FlagColor;
-    curData.textColor = textColor;
+    curData.underline = false;
+    curData.flags = RichTextPainter::FlagAll;
+    curData.textColor = mTextColor;
+    curData.textBackground = Qt::transparent;
+
+    RichTextPainter::CustomRichText_t spaceData;
+    spaceData.underline = false;
+    spaceData.flags = RichTextPainter::FlagNone;
+
+    // Selection underlining
+    spaceData.underlineColor = curData.underlineColor = mSeparatorColor;
+    spaceData.underlineWidth = curData.underlineWidth = 2;
+    spaceData.underlineConnectPrev = curData.underlineConnectPrev = true;
+
     if(!col) //address
     {
         curData.text = makeAddrText(rvaToVa(rva));
         richText.push_back(curData);
     }
-    else if(mDescriptor.at(col - 1).isData == true)
+    else if(mDescriptor.at(col - 1).isData)
     {
-        const ColumnDescriptor_t & desc = mDescriptor.at(col - 1);
-        int wI;
-        QString wStr = "";
+        const ColumnDescriptor & desc = mDescriptor.at(col - 1);
 
-        int wByteCount = getSizeOf(desc.data.itemSize);
-        int wBufferByteCount = desc.itemCount * wByteCount;
+        auto itemSizeBytes = getSizeOf(desc.data.itemSize);
+        auto bufferByteCount = desc.itemCount * itemSizeBytes;
 
-        wBufferByteCount = wBufferByteCount > (dsint)(mMemPage->getSize() - rva) ? mMemPage->getSize() - rva : wBufferByteCount;
+        bufferByteCount = bufferByteCount > (mMemPage->getSize() - rva) ? mMemPage->getSize() - rva : bufferByteCount;
 
-        byte_t* wData = new byte_t[wBufferByteCount];
-        //byte_t wData[mDescriptor.at(col).itemCount * wByteCount];
-
-        mMemPage->read(wData, rva, wBufferByteCount);
-
-        if(desc.textCodec) //convert the row bytes to unicode
+        if(bufferByteCount + 1 > mReadBuffer.size())
         {
+            mReadBuffer.resize(bufferByteCount + 1);
+        }
+
+        auto data = mReadBuffer.data();
+        memset(data, 0, mReadBuffer.size());
+        mMemPage->read(data, rva, bufferByteCount);
+
+        if(!desc.textEncoding.isEmpty()) //convert the row bytes to unicode
+        {
+            // TODO: decode backwards a bit to display the correct state
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+            auto textDecoder = QStringDecoder(desc.textEncoding);
+            curData.text = textDecoder.decode(QByteArrayView((const char*)data, (int)bufferByteCount));
+#else
+            auto textCodec = QTextCodec::codecForName(desc.textEncoding);
+            curData.text = textCodec->toUnicode((const char*)data, (int)bufferByteCount);
+#endif // QT_VERSION
             //This might produce invalid characters in variables-width encodings. This is currently ignored.
-            curData.text = desc.textCodec->toUnicode(QByteArray((const char*)wData, wBufferByteCount));
             curData.text.replace('\t', "\\t");
             curData.text.replace('\f', "\\f");
             curData.text.replace('\v', "\\v");
@@ -597,67 +1020,139 @@ void HexDump::getColumnRichText(int col, dsint rva, RichTextPainter::List & rich
         }
         else
         {
-            QColor highlightColor = ConfigColor("HexDumpModifiedBytesColor");
-
-            for(wI = 0; wI < desc.itemCount && (rva + wI) < (dsint)mMemPage->getSize(); wI++)
+            for(int i = 0; i < desc.itemCount && (rva + i) < mMemPage->getSize(); i++)
             {
-                int maxLen = getStringMaxLength(mDescriptor.at(col - 1).data);
-                QString append = " ";
-                if(!maxLen)
-                    append = "";
-                if((rva + wI + wByteCount - 1) < (dsint)mMemPage->getSize())
-                    wStr = toString(desc.data, (void*)(wData + wI * wByteCount)).rightJustified(maxLen, ' ') + append;
+                curData.text.clear();
+                curData.textColor = mTextColor;
+                curData.textBackground = Qt::transparent;
+                curData.flags = RichTextPainter::FlagAll;
+
+                int maxLen = getStringMaxLength(desc.data);
+                if((rva + i + itemSizeBytes - 1) < mMemPage->getSize())
+                {
+                    duint itemRva = rva + i * itemSizeBytes;
+                    toString(desc.data, itemRva, data + i * itemSizeBytes, curData);
+
+                    if(mSelectionUnderliningEnabled)
+                    {
+                        curData.underline = false;
+                        spaceData.underline = false;
+                        for(const auto & itr : mUnderlineRanges)
+                        {
+                            auto rangeRva = itr.first;
+                            auto rangeSize = itr.second;
+                            if(itemRva >= rangeRva && itemRva + itemSizeBytes <= rangeRva + rangeSize)
+                            {
+                                curData.underline = true;
+                                spaceData.underline = itemRva + itemSizeBytes + 1 <= rangeRva + rangeSize;
+                                break;
+                            }
+                        }
+                    }
+
+                    if(curData.text.length() < maxLen)
+                    {
+                        spaceData.text = QString(' ').repeated(maxLen - curData.text.length());
+                        richText.push_back(spaceData);
+                    }
+
+                    // Pointer underlining
+                    if(mPointerUnderliningEnabled)
+                    {
+                        if(i % sizeof(duint) == 0 && itemSizeBytes == 1 && desc.data.byteMode == HexByte)
+                        {
+                            auto ptr = *(duint*)(data + i * itemSizeBytes);
+                            if((spaceData.underline = curData.underline = DbgMemIsValidReadPtr(ptr)))
+                            {
+                                auto codePage = DbgFunctions()->MemIsCodePage(ptr, false);
+                                auto modbase = DbgFunctions()->ModBaseFromAddr(ptr);
+                                if(modbase)
+                                {
+                                    if(DbgFunctions()->ModGetParty(modbase) == 1) //system
+                                        spaceData.underlineColor = curData.underlineColor = codePage ? mSystemModuleCodePointerHighlightColor : mSystemModuleDataPointerHighlightColor;
+                                    else //user
+                                        spaceData.underlineColor = curData.underlineColor = codePage ? mUserModuleCodePointerHighlightColor : mUserModuleDataPointerHighlightColor;
+                                }
+                                else
+                                    spaceData.underlineColor = curData.underlineColor = codePage ? mUnknownCodePointerHighlightColor : mUnknownDataPointerHighlightColor;
+                            }
+                        }
+                        else
+                        {
+                            spaceData.underlineColor = curData.underlineColor = mSeparatorColor;
+                        }
+                    }
+                    richText.push_back(curData);
+                    if(maxLen)
+                    {
+                        spaceData.text = QString(' ');
+                        // TODO: this is wrong, probably should be something slightly different
+                        /*if(i % sizeof(duint) == sizeof(duint) - 1)
+                            spaceData.underline = false;*/
+                        richText.push_back(spaceData);
+                    }
+                }
                 else
-                    wStr = QString("?").rightJustified(maxLen, ' ') + append;
-                curData.text = wStr;
-                dsint start = rvaToVa(rva + wI * wByteCount);
-                dsint end = start + wByteCount - 1;
-                if(DbgFunctions()->PatchInRange(start, end))
-                    curData.textColor = highlightColor;
-                else
-                    curData.textColor = textColor;
-                richText.push_back(curData);
+                {
+                    curData.text = QString("?").rightJustified(maxLen, ' ');
+                    if(maxLen)
+                        curData.text.append(' ');
+                    richText.push_back(curData);
+                }
             }
         }
 
-        delete[] wData;
+        auto dataStartAddr = rvaToVa(rva);
+        auto dataEndAddr = dataStartAddr + bufferByteCount - 1;
+
+        if(mUnderlineRangeStartVa && mUnderlineRangeEndVa)
+        {
+            // Check if the highlight ranges overlap
+            if(mUnderlineRangeStartVa <= dataEndAddr && dataStartAddr <= mUnderlineRangeEndVa)
+            {
+                for(RichTextPainter::CustomRichText_t & token : richText)
+                {
+                    token.underline = true;
+                    token.underlineColor = token.textColor;
+                }
+                while(richText.back().text == QStringLiteral(" "))
+                    richText.pop_back();
+            }
+        }
     }
 }
 
-QString HexDump::toString(DataDescriptor_t desc, void* data) //convert data to string
+void HexDump::toString(DataDescriptor desc, duint rva, const uint8_t* data, RichTextPainter::CustomRichText_t & richText) const //convert data to string
 {
-    QString wStr = "";
-
     switch(desc.itemSize)
     {
     case Byte:
     {
-        wStr = byteToString(*((byte_t*)data), desc.byteMode);
+        byteToString(rva, *((const uint8_t*)data), desc.byteMode, richText);
     }
     break;
 
     case Word:
     {
-        wStr = wordToString(*((uint16*)data), desc.wordMode);
+        wordToString(rva, *((const uint16_t*)data), desc.wordMode, richText);
     }
     break;
 
     case Dword:
     {
-        wStr = dwordToString(*((uint32*)data), desc.dwordMode);
+        dwordToString(rva, *((const uint32_t*)data), desc.dwordMode, richText);
     }
     break;
 
     case Qword:
     {
-        wStr = qwordToString(*((uint64*)data), desc.qwordMode);
+        qwordToString(rva, *((const uint64_t*)data), desc.qwordMode, richText);
     }
     break;
 
     case Tword:
     {
-        //TODO: sizeof(long double)=12, not 10
-        wStr = twordToString(*((long double*)data), desc.twordMode);
+        twordToString(rva, data, desc.twordMode, richText);
     }
     break;
 
@@ -668,41 +1163,49 @@ QString HexDump::toString(DataDescriptor_t desc, void* data) //convert data to s
     break;
     }
 
-    return wStr;
+    if(desc.itemSize == Byte) //byte patches are handled in byteToString
+        return;
+
+    duint start = rvaToVa(rva);
+    duint end = start + getSizeOf(desc.itemSize) - 1;
+    if(DbgFunctions()->PatchInRange(start, end))
+        richText.textColor = ConfigColor("HexDumpModifiedBytesColor");
 }
 
-QString HexDump::byteToString(byte_t byte, ByteViewMode_e mode)
+void HexDump::byteToString(duint rva, uint8_t byte, ByteViewMode mode, RichTextPainter::CustomRichText_t & richText) const
 {
-    QString wStr = "";
+    QString str = "";
 
     switch(mode)
     {
     case HexByte:
     {
-        wStr = QString("%1").arg((unsigned char)byte, 2, 16, QChar('0')).toUpper();
+        str = ToByteString((unsigned char)byte);
     }
     break;
 
     case AsciiByte:
     {
-        QChar wChar = QChar::fromLatin1((char)byte);
+        QChar ch = QChar::fromLatin1((char)byte);
 
-        if(wChar.isPrint() == true)
-            wStr = QString(wChar);
+        if(ch.isPrint())
+            str = QString(ch);
+        else if(!ch.unicode())
+            str = mNullReplace;
         else
-            wStr = ".";
+            str = mNonprintReplace;
     }
     break;
 
     case SignedDecByte:
     {
-        wStr = QString::number((int)((char)byte));
+        str = QString::number((int)((char)byte));
     }
     break;
 
     case UnsignedDecByte:
     {
-        wStr = QString::number((unsigned int)byte);
+        str = QString::number((unsigned int)byte);
     }
     break;
 
@@ -713,40 +1216,90 @@ QString HexDump::byteToString(byte_t byte, ByteViewMode_e mode)
     break;
     }
 
-    return wStr;
+    richText.text = str;
+
+    DBGPATCHINFO patchInfo;
+    if(DbgFunctions()->PatchGetEx(rvaToVa(rva), &patchInfo))
+    {
+        if(byte == patchInfo.newbyte)
+        {
+            richText.textColor = mModifiedBytesColor;
+            richText.textBackground = mModifiedBytesBackgroundColor;
+        }
+        else
+        {
+            richText.textColor = mRestoredBytesColor;
+            richText.textBackground = mRestoredBytesBackgroundColor;
+        }
+    }
+    else
+    {
+        switch(byte)
+        {
+        case 0x00:
+            richText.textColor = mByte00Color;
+            richText.textBackground = mByte00BackgroundColor;
+            break;
+        case 0x7F:
+            richText.textColor = mByte7FColor;
+            richText.textBackground = mByte7FBackgroundColor;
+            break;
+        case 0xFF:
+            richText.textColor = mByteFFColor;
+            richText.textBackground = mByteFFBackgroundColor;
+            break;
+        default:
+            if((byte >= 0x20 && byte <= 0x7E) || isspace(byte))
+            {
+                richText.textColor = mByteIsPrintColor;
+                richText.textBackground = mByteIsPrintBackgroundColor;
+            }
+            break;
+        }
+    }
 }
 
-QString HexDump::wordToString(uint16 word, WordViewMode_e mode)
+void HexDump::wordToString(duint rva, uint16_t word, WordViewMode mode, RichTextPainter::CustomRichText_t & richText) const
 {
-    QString wStr = "";
+    Q_UNUSED(rva);
+    QString str;
 
     switch(mode)
     {
     case HexWord:
     {
-        wStr = QString("%1").arg((unsigned short)word, 4, 16, QChar('0')).toUpper();
+        str = ToWordString((unsigned short)word);
     }
     break;
 
     case UnicodeWord:
     {
-        QChar wChar = QChar::fromLatin1((char)word & 0xFF);
-        if(wChar.isPrint() == true && (word >> 8) == 0)
-            wStr = QString(wChar);
+        QChar ch = QChar::fromLatin1((char)word & 0xFF);
+        if(ch.isPrint() && (word >> 8) == 0)
+            str = QString(ch);
+        else if(!ch.unicode())
+            str = mNullReplace;
         else
-            wStr = ".";
+            str = mNonprintReplace;
     }
     break;
 
     case SignedDecWord:
     {
-        wStr = QString::number((int)((short)word));
+        str = QString::number((int)((short)word));
     }
     break;
 
     case UnsignedDecWord:
     {
-        wStr = QString::number((unsigned int)word);
+        str = QString::number((unsigned int)word);
+    }
+    break;
+
+    case HalfFloatWord:
+    {
+        auto value = (float) * (const qfloat16*)&word;
+        str = ToFloatingString<float>(&value, 3);
     }
     break;
 
@@ -757,36 +1310,37 @@ QString HexDump::wordToString(uint16 word, WordViewMode_e mode)
     break;
     }
 
-    return wStr;
+    richText.text = str;
 }
 
-QString HexDump::dwordToString(uint32 dword, DwordViewMode_e mode)
+void HexDump::dwordToString(duint rva, uint32_t dword, DwordViewMode mode, RichTextPainter::CustomRichText_t & richText)
 {
-    QString wStr = "";
+    Q_UNUSED(rva);
+    QString str;
 
     switch(mode)
     {
     case HexDword:
     {
-        wStr = QString("%1").arg((unsigned int)dword, 8, 16, QChar('0')).toUpper();
+        str = QString("%1").arg((unsigned int)dword, 8, 16, QChar('0')).toUpper();
     }
     break;
 
     case SignedDecDword:
     {
-        wStr = QString::number((int)dword);
+        str = QString::number((int)dword);
     }
     break;
 
     case UnsignedDecDword:
     {
-        wStr = QString::number((unsigned int)dword);
+        str = QString::number((unsigned int)dword);
     }
     break;
 
     case FloatDword:
     {
-        wStr = ToFloatString(&dword);
+        str = ToFloatString(&dword);
     }
     break;
 
@@ -797,36 +1351,37 @@ QString HexDump::dwordToString(uint32 dword, DwordViewMode_e mode)
     break;
     }
 
-    return wStr;
+    richText.text = str;
 }
 
-QString HexDump::qwordToString(uint64 qword, QwordViewMode_e mode)
+void HexDump::qwordToString(duint rva, uint64_t qword, QwordViewMode mode, RichTextPainter::CustomRichText_t & richText)
 {
-    QString wStr = "";
+    Q_UNUSED(rva);
+    QString str;
 
     switch(mode)
     {
     case HexQword:
     {
-        wStr = QString("%1").arg((unsigned long long)qword, 16, 16, QChar('0')).toUpper();
+        str = QString("%1").arg((unsigned long long)qword, 16, 16, QChar('0')).toUpper();
     }
     break;
 
     case SignedDecQword:
     {
-        wStr = QString::number((long long)qword);
+        str = QString::number((long long)qword);
     }
     break;
 
     case UnsignedDecQword:
     {
-        wStr = QString::number((unsigned long long)qword);
+        str = QString::number((unsigned long long)qword);
     }
     break;
 
     case DoubleQword:
     {
-        wStr = ToDoubleString(&qword);
+        str = ToDoubleString(&qword);
     }
     break;
 
@@ -837,18 +1392,19 @@ QString HexDump::qwordToString(uint64 qword, QwordViewMode_e mode)
     break;
     }
 
-    return wStr;
+    richText.text = str;
 }
 
-QString HexDump::twordToString(long double tword, TwordViewMode_e mode)
+void HexDump::twordToString(duint rva, const void* tword, TwordViewMode mode, RichTextPainter::CustomRichText_t & richText)
 {
-    QString wStr = "";
+    Q_UNUSED(rva);
+    QString str;
 
     switch(mode)
     {
     case FloatTword:
     {
-        wStr = ToLongDoubleString(&tword);
+        str = ToLongDoubleString(tword);
     }
     break;
 
@@ -859,87 +1415,47 @@ QString HexDump::twordToString(long double tword, TwordViewMode_e mode)
     break;
     }
 
-    return wStr;
+    richText.text = str;
 }
 
-int HexDump::getSizeOf(DataSize_e size)
+size_t HexDump::getSizeOf(DataSize size)
 {
-    int wSize = 0;
-
-    switch(size)
-    {
-    case Byte:          // 1 Byte
-    {
-        wSize = 1;
-    }
-    break;
-
-    case Word:          // 2 Bytes
-    {
-        wSize = 2;
-    }
-    break;
-
-    case Dword:         // 4 Bytes
-    {
-        wSize = 4;
-    }
-    break;
-
-    case Qword:         // 8 Bytes
-    {
-        wSize = 8;
-    }
-    break;
-
-    case Tword:         // 10 Bytes
-    {
-        wSize = 10;
-    }
-    break;
-
-    default:
-    {
-        wSize = 0;
-    }
-    }
-
-    return wSize;
+    return size_t(size);
 }
 
-int HexDump::getStringMaxLength(DataDescriptor_t desc)
+static int getStringMaxLength(HexDump::DataDescriptor desc)
 {
-    int wLength = 0;
+    int length = 0;
 
     switch(desc.itemSize)
     {
-    case Byte:
+    case HexDump::Byte:
     {
-        wLength = byteStringMaxLength(desc.byteMode);
+        length = byteStringMaxLength(desc.byteMode);
     }
     break;
 
-    case Word:
+    case HexDump::Word:
     {
-        wLength = wordStringMaxLength(desc.wordMode);
+        length = wordStringMaxLength(desc.wordMode);
     }
     break;
 
-    case Dword:
+    case HexDump::Dword:
     {
-        wLength = dwordStringMaxLength(desc.dwordMode);
+        length = dwordStringMaxLength(desc.dwordMode);
     }
     break;
 
-    case Qword:
+    case HexDump::Qword:
     {
-        wLength = qwordStringMaxLength(desc.qwordMode);
+        length = qwordStringMaxLength(desc.qwordMode);
     }
     break;
 
-    case Tword:
+    case HexDump::Tword:
     {
-        wLength = twordStringMaxLength(desc.twordMode);
+        length = twordStringMaxLength(desc.twordMode);
     }
     break;
 
@@ -950,36 +1466,36 @@ int HexDump::getStringMaxLength(DataDescriptor_t desc)
     break;
     }
 
-    return wLength;
+    return length;
 }
 
-int HexDump::byteStringMaxLength(ByteViewMode_e mode)
+static int byteStringMaxLength(HexDump::ByteViewMode mode)
 {
-    int wLength = 0;
+    int length = 0;
 
     switch(mode)
     {
-    case HexByte:
+    case HexDump::HexByte:
     {
-        wLength = 2;
+        length = 2;
     }
     break;
 
-    case AsciiByte:
+    case HexDump::AsciiByte:
     {
-        wLength = 0;
+        length = 0;
     }
     break;
 
-    case SignedDecByte:
+    case HexDump::SignedDecByte:
     {
-        wLength = 4;
+        length = 4;
     }
     break;
 
-    case UnsignedDecByte:
+    case HexDump::UnsignedDecByte:
     {
-        wLength = 3;
+        length = 3;
     }
     break;
 
@@ -990,36 +1506,42 @@ int HexDump::byteStringMaxLength(ByteViewMode_e mode)
     break;
     }
 
-    return wLength;
+    return length;
 }
 
-int HexDump::wordStringMaxLength(WordViewMode_e mode)
+static int wordStringMaxLength(HexDump::WordViewMode mode)
 {
-    int wLength = 0;
+    int length = 0;
 
     switch(mode)
     {
-    case HexWord:
+    case HexDump::HexWord:
     {
-        wLength = 4;
+        length = 4;
     }
     break;
 
-    case UnicodeWord:
+    case HexDump::UnicodeWord:
     {
-        wLength = 0;
+        length = 0;
     }
     break;
 
-    case SignedDecWord:
+    case HexDump::SignedDecWord:
     {
-        wLength = 6;
+        length = 6;
     }
     break;
 
-    case UnsignedDecWord:
+    case HexDump::UnsignedDecWord:
     {
-        wLength = 5;
+        length = 5;
+    }
+    break;
+
+    case HexDump::HalfFloatWord:
+    {
+        length = 9;
     }
     break;
 
@@ -1030,36 +1552,36 @@ int HexDump::wordStringMaxLength(WordViewMode_e mode)
     break;
     }
 
-    return wLength;
+    return length;
 }
 
-int HexDump::dwordStringMaxLength(DwordViewMode_e mode)
+static int dwordStringMaxLength(HexDump::DwordViewMode mode)
 {
-    int wLength = 0;
+    int length = 0;
 
     switch(mode)
     {
-    case HexDword:
+    case HexDump::HexDword:
     {
-        wLength = 8;
+        length = 8;
     }
     break;
 
-    case SignedDecDword:
+    case HexDump::SignedDecDword:
     {
-        wLength = 11;
+        length = 11;
     }
     break;
 
-    case UnsignedDecDword:
+    case HexDump::UnsignedDecDword:
     {
-        wLength = 10;
+        length = 10;
     }
     break;
 
-    case FloatDword:
+    case HexDump::FloatDword:
     {
-        wLength = 13;
+        length = 13;
     }
     break;
 
@@ -1070,36 +1592,36 @@ int HexDump::dwordStringMaxLength(DwordViewMode_e mode)
     break;
     }
 
-    return wLength;
+    return length;
 }
 
-int HexDump::qwordStringMaxLength(QwordViewMode_e mode)
+static int qwordStringMaxLength(HexDump::QwordViewMode mode)
 {
-    int wLength = 0;
+    int length = 0;
 
     switch(mode)
     {
-    case HexQword:
+    case HexDump::HexQword:
     {
-        wLength = 16;
+        length = 16;
     }
     break;
 
-    case SignedDecQword:
+    case HexDump::SignedDecQword:
     {
-        wLength = 20;
+        length = 20;
     }
     break;
 
-    case UnsignedDecQword:
+    case HexDump::UnsignedDecQword:
     {
-        wLength = 20;
+        length = 20;
     }
     break;
 
-    case DoubleQword:
+    case HexDump::DoubleQword:
     {
-        wLength = 23;
+        length = 23;
     }
     break;
 
@@ -1110,18 +1632,18 @@ int HexDump::qwordStringMaxLength(QwordViewMode_e mode)
     break;
     }
 
-    return wLength;
+    return length;
 }
 
-int HexDump::twordStringMaxLength(TwordViewMode_e mode)
+static int twordStringMaxLength(HexDump::TwordViewMode mode)
 {
-    int wLength = 0;
+    int length = 0;
 
     switch(mode)
     {
-    case FloatTword:
+    case HexDump::FloatTword:
     {
-        wLength = 29;
+        length = 29;
     }
     break;
 
@@ -1132,29 +1654,29 @@ int HexDump::twordStringMaxLength(TwordViewMode_e mode)
     break;
     }
 
-    return wLength;
+    return length;
 }
 
-int HexDump::getItemIndexFromX(int x)
+int HexDump::getItemIndexFromX(int x) const
 {
-    int wColIndex = getColumnIndexFromX(x);
+    auto colIndex = getColumnIndexFromX(x);
 
-    if(wColIndex > 0)
+    if(colIndex > 0)
     {
-        int wColStartingPos = getColumnPosition(wColIndex);
-        int wRelativeX = x - wColStartingPos;
+        int colStartingPos = getColumnPosition(colIndex);
+        int relativeX = x - colStartingPos;
 
-        int wItemPixWidth = getItemPixelWidth(mDescriptor.at(wColIndex - 1));
-        int wCharWidth = getCharWidth();
-        if(wItemPixWidth == wCharWidth)
-            wRelativeX -= 4;
+        int itemPixWidth = getItemPixelWidth(mDescriptor.at(colIndex - 1));
+        int charWidth = getCharWidth();
+        if(itemPixWidth == charWidth)
+            relativeX -= 4;
 
-        int wItemIndex = wRelativeX / wItemPixWidth;
+        int itemIndex = relativeX / itemPixWidth;
 
-        wItemIndex = wItemIndex < 0 ? 0 : wItemIndex;
-        wItemIndex = wItemIndex > (mDescriptor.at(wColIndex - 1).itemCount - 1) ? (mDescriptor.at(wColIndex - 1).itemCount - 1) : wItemIndex;
+        itemIndex = itemIndex < 0 ? 0 : itemIndex;
+        itemIndex = itemIndex > (mDescriptor.at(colIndex - 1).itemCount - 1) ? (mDescriptor.at(colIndex - 1).itemCount - 1) : itemIndex;
 
-        return wItemIndex;
+        return itemIndex;
     }
     else
     {
@@ -1162,55 +1684,55 @@ int HexDump::getItemIndexFromX(int x)
     }
 }
 
-dsint HexDump::getItemStartingAddress(int x, int y)
+duint HexDump::getItemStartingAddress(int x, int y)
 {
-    int wRowOffset = getIndexOffsetFromY(transY(y));
-    int wItemIndex = getItemIndexFromX(x);
-    int wColIndex = getColumnIndexFromX(x);
-    dsint wStartingAddress = 0;
+    auto rowOffset = getIndexOffsetFromY(transY(y));
+    auto itemIndex = getItemIndexFromX(x);
+    auto colIndex = getColumnIndexFromX(x);
+    duint startingAddress = 0;
 
-    if(wColIndex > 0)
+    if(colIndex > 0)
     {
-        wColIndex -= 1;
-        wStartingAddress = (getTableOffset() + wRowOffset) * (mDescriptor.at(wColIndex).itemCount * getSizeOf(mDescriptor.at(wColIndex).data.itemSize)) + wItemIndex * getSizeOf(mDescriptor.at(wColIndex).data.itemSize) - mByteOffset;
+        colIndex -= 1;
+        startingAddress = (getTableOffset() + rowOffset) * (mDescriptor.at(colIndex).itemCount * getSizeOf(mDescriptor.at(colIndex).data.itemSize)) + itemIndex * getSizeOf(mDescriptor.at(colIndex).data.itemSize) - mByteOffset;
     }
 
-    return wStartingAddress;
+    return startingAddress;
 }
 
-int HexDump::getBytePerRowCount()
+size_t HexDump::getBytePerRowCount() const
 {
     return mDescriptor.at(0).itemCount * getSizeOf(mDescriptor.at(0).data.itemSize);
 }
 
-int HexDump::getItemPixelWidth(ColumnDescriptor_t desc)
+int HexDump::getItemPixelWidth(ColumnDescriptor desc) const
 {
-    int wCharWidth = getCharWidth();
-    int wItemPixWidth = getStringMaxLength(desc.data) * wCharWidth + wCharWidth;
+    int charWidth = getCharWidth();
+    int itemPixWidth = getStringMaxLength(desc.data) * charWidth + charWidth;
 
-    return wItemPixWidth;
+    return itemPixWidth;
 }
 
-void HexDump::appendDescriptor(int width, QString title, bool clickable, ColumnDescriptor_t descriptor)
+void HexDump::appendDescriptor(int width, QString title, bool clickable, ColumnDescriptor descriptor)
 {
     addColumnAt(width, title, clickable);
     mDescriptor.append(descriptor);
 }
 
 //Clears the descriptors, append a new descriptor and fix the tableOffset (use this instead of clearDescriptors()
-void HexDump::appendResetDescriptor(int width, QString title, bool clickable, ColumnDescriptor_t descriptor)
+void HexDump::appendResetDescriptor(int width, QString title, bool clickable, ColumnDescriptor descriptor)
 {
-    mAllowPainting = false;
+    setAllowPainting(false);
     if(mDescriptor.size())
     {
-        dsint wRVA = getTableOffset() * getBytePerRowCount() - mByteOffset;
+        auto rva = getTableOffset() * getBytePerRowCount() - mByteOffset;
         clearDescriptors();
         appendDescriptor(width, title, clickable, descriptor);
-        printDumpAt(rvaToVa(wRVA), true, false);
+        printDumpAt(rvaToVa(rva), true, false);
     }
     else
         appendDescriptor(width, title, clickable, descriptor);
-    mAllowPainting = true;
+    setAllowPainting(true);
 }
 
 void HexDump::clearDescriptors()
@@ -1218,7 +1740,7 @@ void HexDump::clearDescriptors()
     deleteAllColumns();
     mDescriptor.clear();
     int charwidth = getCharWidth();
-    addColumnAt(8 + charwidth * 2 * sizeof(duint), "Address", false); //address
+    addColumnAt(8 + charwidth * 2 * sizeof(duint), tr("Address"), false); //address
 }
 
 void HexDump::debugStateChanged(DBGSTATE state)
@@ -1229,4 +1751,35 @@ void HexDump::debugStateChanged(DBGSTATE state)
         setRowCount(0);
         reloadData();
     }
+}
+
+void HexDump::selectionChangedSlot()
+{
+    accessibilitySelectionChanged();
+}
+
+int HexDump::accessibilitySelectedRow() const
+{
+    const duint bytesPerRow = getBytePerRowCount();
+    if(bytesPerRow == 0)
+        return -1;
+
+    const duint selection = getInitialSelection();
+    const duint firstAddress = getTableOffsetRva();
+    const duint visibleSize = getViewableRowsCount() * bytesPerRow;
+    if(selection >= firstAddress && selection - firstAddress < visibleSize)
+        return static_cast<int>((selection - firstAddress) / bytesPerRow);
+    return -1;
+}
+
+void HexDump::setAddressColor(duint vaStart, duint vaEnd, unsigned int color)
+{
+    DbgSetAddressColorRange(vaStart, vaEnd, color);
+    updateViewport();
+}
+
+void HexDump::clearAddressColor(duint vaStart, duint vaEnd)
+{
+    DbgDelAddressColorRange(vaStart, vaEnd);
+    updateViewport();
 }

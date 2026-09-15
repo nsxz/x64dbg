@@ -130,7 +130,7 @@ SCRIPT_EXPORT bool Script::Module::GetMainModuleInfo(ModuleInfo* info)
 
 SCRIPT_EXPORT duint Script::Module::GetMainModuleBase()
 {
-    return dbggetdebuggedbase();
+    return dbgdebuggedbase();
 }
 
 SCRIPT_EXPORT duint Script::Module::GetMainModuleSize()
@@ -165,11 +165,8 @@ SCRIPT_EXPORT bool Script::Module::GetMainModuleSectionList(ListOf(ModuleSection
 
 SCRIPT_EXPORT bool Script::Module::GetList(ListOf(ModuleInfo) list)
 {
-    std::vector<MODINFO> modList;
-    ModGetList(modList);
     std::vector<ModuleInfo> modScriptList;
-    modScriptList.reserve(modList.size());
-    for(const auto & mod : modList)
+    ModEnum([&modScriptList](const MODINFO & mod)
     {
         ModuleInfo scriptMod;
         scriptMod.base = mod.base;
@@ -180,6 +177,63 @@ SCRIPT_EXPORT bool Script::Module::GetList(ListOf(ModuleInfo) list)
         strcat_s(scriptMod.name, mod.extension);
         strcpy_s(scriptMod.path, mod.path);
         modScriptList.push_back(scriptMod);
-    }
+    });
     return BridgeList<ModuleInfo>::CopyData(list, modScriptList);
+}
+
+SCRIPT_EXPORT bool Script::Module::GetExports(const ModuleInfo* mod, ListOf(ModuleExport) list)
+{
+    SHARED_ACQUIRE(LockModules);
+
+    if(mod == nullptr)
+        return false;
+
+    MODINFO* modInfo = ModInfoFromAddr(mod->base);
+    if(modInfo == nullptr)
+        return false;
+
+    std::vector<ModuleExport> modExportList;
+    modExportList.reserve(modInfo->exports.size());
+
+    for(auto & modExport : modInfo->exports)
+    {
+        ModuleExport entry;
+        entry.ordinal = modExport.ordinal;
+        entry.rva = modExport.rva;
+        entry.va = modExport.rva + modInfo->base;
+        entry.forwarded = modExport.forwarded;
+        strncpy_s(entry.forwardName, modExport.forwardName.c_str(), _TRUNCATE);
+        strncpy_s(entry.name, modExport.name.c_str(), _TRUNCATE);
+        strncpy_s(entry.undecoratedName, modExport.undecoratedName.c_str(), _TRUNCATE);
+        modExportList.push_back(entry);
+    }
+    return BridgeList<ModuleExport>::CopyData(list, modExportList);
+}
+
+
+SCRIPT_EXPORT bool Script::Module::GetImports(const ModuleInfo* mod, ListOf(ModuleImport) list)
+{
+    SHARED_ACQUIRE(LockModules);
+
+    if(mod == nullptr)
+        return false;
+
+    MODINFO* modInfo = ModInfoFromAddr(mod->base);
+    if(modInfo == nullptr)
+        return false;
+
+    std::vector<ModuleImport> modImportList;
+    modImportList.reserve(modInfo->imports.size());
+
+    for(auto & modImport : modInfo->imports)
+    {
+        ModuleImport entry;
+        entry.ordinal = modImport.ordinal;
+        entry.iatRva = modImport.iatRva;
+        entry.iatVa = modImport.iatRva + modInfo->base;
+        strncpy_s(entry.name, modImport.name.c_str(), _TRUNCATE);
+        strncpy_s(entry.undecoratedName, modImport.undecoratedName.c_str(), _TRUNCATE);
+        modImportList.push_back(entry);
+    }
+    return BridgeList<ModuleImport>::CopyData(list, modImportList);
 }

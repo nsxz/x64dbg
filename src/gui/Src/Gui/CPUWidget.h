@@ -1,16 +1,18 @@
-#ifndef CPUWIDGET_H
-#define CPUWIDGET_H
+#pragma once
 
 #include <QWidget>
-#include <QTabWidget>
-#include <QVBoxLayout>
-#include "CPUSideBar.h"
-#include "CPUDisassembly.h"
-#include "CPUMultiDump.h"
-#include "CPUStack.h"
-#include "RegistersView.h"
-#include "CPUInfoBox.h"
-#include "CPUArgumentWidget.h"
+#include "Bridge.h"
+
+class QVBoxLayout;
+class CPUSideBar;
+class CPUDisassembly;
+class CPUMultiDump;
+class CPUStack;
+class CPURegistersView;
+class CPUInfoBox;
+class CPUArgumentWidget;
+class DisassemblerGraphView;
+class MHDetachedWindow;
 
 namespace Ui
 {
@@ -22,37 +24,50 @@ class CPUWidget : public QWidget
     Q_OBJECT
 
 public:
-    explicit CPUWidget(QWidget* parent = 0);
+    explicit CPUWidget(Architecture* architecture, QWidget* parent = nullptr);
     ~CPUWidget();
+    Architecture* getArchitecture() const;
 
     // Misc
     void setDefaultDisposition();
-    void setDisasmFocus();
 
-    // Layout getters
-    QVBoxLayout* getTopLeftUpperWidget();
-    QVBoxLayout* getTopLeftLowerWidget();
-    QVBoxLayout* getTopRightWidget();
-    QVBoxLayout* getBotLeftWidget();
-    QVBoxLayout* getBotRightWidget();
+    void saveWindowSettings();
+    void loadWindowSettings();
+
+    duint getSelectionVa();
 
     // Widget getters
     CPUSideBar* getSidebarWidget();
     CPUDisassembly* getDisasmWidget();
+    DisassemblerGraphView* getGraphWidget();
     CPUMultiDump* getDumpWidget();
     CPUStack* getStackWidget();
+    CPUInfoBox* getInfoBoxWidget();
+
+public slots:
+    void setDisasmFocus();
+    void setGraphFocus();
 
 protected:
     CPUSideBar* mSideBar;
-    CPUDisassembly* mDisas;
+    CPUDisassembly* mDisassembly;
+    DisassemblerGraphView* mGraph;
+    MHDetachedWindow* mGraphWindow;
     CPUMultiDump* mDump;
     CPUStack* mStack;
-    RegistersView* mGeneralRegs;
+    CPURegistersView* mGeneralRegs;
     CPUInfoBox* mInfo;
     CPUArgumentWidget* mArgumentWidget;
 
-private:
-    Ui::CPUWidget* ui;
-};
+    int disasMode;
 
-#endif // CPUWIDGET_H
+private:
+    Architecture* mArchitecture = nullptr;
+    Ui::CPUWidget* ui;
+    QByteArray mDisasmSidebarSplitterStatus;
+
+private slots:
+    void splitterMoved(int pos, int index);
+    void attachGraph(QWidget* widget);
+    void detachGraph();
+};

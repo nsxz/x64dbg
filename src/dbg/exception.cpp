@@ -1,87 +1,286 @@
 #include <unordered_map>
+#include <algorithm>
 #include "exception.h"
+#include "filehelper.h"
+#include "value.h"
+#include "console.h"
+#include "threading.h"
+#include "module.h"
+#include "syscalls.h"
 
-std::unordered_map<unsigned int, const char*> ExceptionNames;
+static std::unordered_map<unsigned int, String> ExceptionNames;
+static std::unordered_map<unsigned int, String> NtStatusNames;
+static std::unordered_map<unsigned int, String> ErrorNames;
+static std::unordered_map<String, unsigned int> Constants;
+static std::unordered_map<unsigned int, String> SyscallIndices;
+static std::unordered_map<String, unsigned int> SyscallNames;
 
-void ExceptionCodeInit()
+static bool UniversalCodeInit(const String & file, std::unordered_map<unsigned int, String> & names, unsigned char radix)
 {
-    ExceptionNames.clear();
-    ExceptionNames.insert(std::make_pair(0x000006BA, "RPC_S_SERVER_UNAVAILABLE"));
-    ExceptionNames.insert(std::make_pair(0x0000071A, "RPC_S_CALL_CANCELLED"));
-    ExceptionNames.insert(std::make_pair(0x04242420, "CLRDBG_NOTIFICATION_EXCEPTION_CODE"));
-    ExceptionNames.insert(std::make_pair(0x40000005, "STATUS_SEGMENT_NOTIFICATION"));
-    ExceptionNames.insert(std::make_pair(0x40000015, "STATUS_FATAL_APP_EXIT"));
-    ExceptionNames.insert(std::make_pair(0x4000001C, "STATUS_WX86_UNSIMULATE"));
-    ExceptionNames.insert(std::make_pair(0x4000001D, "STATUS_WX86_CONTINUE"));
-    ExceptionNames.insert(std::make_pair(0x4000001E, "STATUS_WX86_SINGLE_STEP"));
-    ExceptionNames.insert(std::make_pair(0x4000001F, "STATUS_WX86_BREAKPOINT"));
-    ExceptionNames.insert(std::make_pair(0x40000020, "STATUS_WX86_EXCEPTION_CONTINUE"));
-    ExceptionNames.insert(std::make_pair(0x40000021, "STATUS_WX86_EXCEPTION_LASTCHANCE"));
-    ExceptionNames.insert(std::make_pair(0x40000022, "STATUS_WX86_EXCEPTION_CHAIN"));
-    ExceptionNames.insert(std::make_pair(0x40000028, "STATUS_WX86_CREATEWX86TIB"));
-    ExceptionNames.insert(std::make_pair(0x40010003, "DBG_TERMINATE_THREAD"));
-    ExceptionNames.insert(std::make_pair(0x40010004, "DBG_TERMINATE_PROCESS"));
-    ExceptionNames.insert(std::make_pair(0x40010005, "DBG_CONTROL_C"));
-    ExceptionNames.insert(std::make_pair(0x40010006, "DBG_PRINTEXCEPTION_C"));
-    ExceptionNames.insert(std::make_pair(0x40010007, "DBG_RIPEXCEPTION"));
-    ExceptionNames.insert(std::make_pair(0x40010008, "DBG_CONTROL_BREAK"));
-    ExceptionNames.insert(std::make_pair(0x40010009, "DBG_COMMAND_EXCEPTION"));
-    ExceptionNames.insert(std::make_pair(0x4001000A, "DBG_PRINTEXCEPTION_WIDE_C"));
-    ExceptionNames.insert(std::make_pair(0x406D1388, "MS_VC_EXCEPTION"));
-    ExceptionNames.insert(std::make_pair(0x80000001, "EXCEPTION_GUARD_PAGE"));
-    ExceptionNames.insert(std::make_pair(0x80000002, "EXCEPTION_DATATYPE_MISALIGNMENT"));
-    ExceptionNames.insert(std::make_pair(0x80000003, "EXCEPTION_BREAKPOINT"));
-    ExceptionNames.insert(std::make_pair(0x80000004, "EXCEPTION_SINGLE_STEP"));
-    ExceptionNames.insert(std::make_pair(0x80000026, "STATUS_LONGJUMP"));
-    ExceptionNames.insert(std::make_pair(0x80000029, "STATUS_UNWIND_CONSOLIDATE"));
-    ExceptionNames.insert(std::make_pair(0x80010001, "DBG_EXCEPTION_NOT_HANDLED"));
-    ExceptionNames.insert(std::make_pair(0xC0000005, "EXCEPTION_ACCESS_VIOLATION"));
-    ExceptionNames.insert(std::make_pair(0xC0000006, "EXCEPTION_IN_PAGE_ERROR"));
-    ExceptionNames.insert(std::make_pair(0xC0000008, "EXCEPTION_INVALID_HANDLE"));
-    ExceptionNames.insert(std::make_pair(0xC000000D, "STATUS_INVALID_PARAMETER"));
-    ExceptionNames.insert(std::make_pair(0xC0000017, "STATUS_NO_MEMORY"));
-    ExceptionNames.insert(std::make_pair(0xC000001D, "EXCEPTION_ILLEGAL_INSTRUCTION"));
-    ExceptionNames.insert(std::make_pair(0xC0000025, "EXCEPTION_NONCONTINUABLE_EXCEPTION"));
-    ExceptionNames.insert(std::make_pair(0xC0000026, "EXCEPTION_INVALID_DISPOSITION"));
-    ExceptionNames.insert(std::make_pair(0xC000008C, "EXCEPTION_ARRAY_BOUNDS_EXCEEDED"));
-    ExceptionNames.insert(std::make_pair(0xC000008D, "EXCEPTION_FLT_DENORMAL_OPERAND"));
-    ExceptionNames.insert(std::make_pair(0xC000008E, "EXCEPTION_FLT_DIVIDE_BY_ZERO"));
-    ExceptionNames.insert(std::make_pair(0xC000008F, "EXCEPTION_FLT_INEXACT_RESULT"));
-    ExceptionNames.insert(std::make_pair(0xC0000090, "EXCEPTION_FLT_INVALID_OPERATION"));
-    ExceptionNames.insert(std::make_pair(0xC0000091, "EXCEPTION_FLT_OVERFLOW"));
-    ExceptionNames.insert(std::make_pair(0xC0000092, "EXCEPTION_FLT_STACK_CHECK"));
-    ExceptionNames.insert(std::make_pair(0xC0000093, "EXCEPTION_FLT_UNDERFLOW"));
-    ExceptionNames.insert(std::make_pair(0xC0000094, "EXCEPTION_INT_DIVIDE_BY_ZERO"));
-    ExceptionNames.insert(std::make_pair(0xC0000095, "EXCEPTION_INT_OVERFLOW"));
-    ExceptionNames.insert(std::make_pair(0xC0000096, "EXCEPTION_PRIV_INSTRUCTION"));
-    ExceptionNames.insert(std::make_pair(0xC00000FD, "EXCEPTION_STACK_OVERFLOW"));
-    ExceptionNames.insert(std::make_pair(0xC0000135, "STATUS_DLL_NOT_FOUND"));
-    ExceptionNames.insert(std::make_pair(0xC0000138, "STATUS_ORDINAL_NOT_FOUND"));
-    ExceptionNames.insert(std::make_pair(0xC0000139, "STATUS_ENTRYPOINT_NOT_FOUND"));
-    ExceptionNames.insert(std::make_pair(0xC000013A, "STATUS_CONTROL_C_EXIT"));
-    ExceptionNames.insert(std::make_pair(0xC0000142, "STATUS_DLL_INIT_FAILED"));
-    ExceptionNames.insert(std::make_pair(0xC000014A, "STATUS_ILLEGAL_FLOAT_CONTEXT"));
-    ExceptionNames.insert(std::make_pair(0xC0000194, "EXCEPTION_POSSIBLE_DEADLOCK"));
-    ExceptionNames.insert(std::make_pair(0xC00001A5, "STATUS_INVALID_EXCEPTION_HANDLER"));
-    ExceptionNames.insert(std::make_pair(0xC00002B4, "STATUS_FLOAT_MULTIPLE_FAULTS"));
-    ExceptionNames.insert(std::make_pair(0xC00002B5, "STATUS_FLOAT_MULTIPLE_TRAPS"));
-    ExceptionNames.insert(std::make_pair(0xC00002C5, "STATUS_DATATYPE_MISALIGNMENT_ERROR"));
-    ExceptionNames.insert(std::make_pair(0xC00002C9, "STATUS_REG_NAT_CONSUMPTION"));
-    ExceptionNames.insert(std::make_pair(0xC0000374, "STATUS_HEAP_CORRUPTION"));
-    ExceptionNames.insert(std::make_pair(0xC0000409, "STATUS_STACK_BUFFER_OVERRUN"));
-    ExceptionNames.insert(std::make_pair(0xC0000417, "STATUS_INVALID_CRUNTIME_PARAMETER"));
-    ExceptionNames.insert(std::make_pair(0xC000041D, "STATUS_USER_CALLBACK"));
-    ExceptionNames.insert(std::make_pair(0xC0000420, "STATUS_ASSERTION_FAILURE"));
-    ExceptionNames.insert(std::make_pair(0xC015000F, "STATUS_SXS_EARLY_DEACTIVATION"));
-    ExceptionNames.insert(std::make_pair(0xC0150010, "STATUS_SXS_INVALID_DEACTIVATION"));
-    ExceptionNames.insert(std::make_pair(0xE0434352, "CLR_EXCEPTION"));
-    ExceptionNames.insert(std::make_pair(0xE06D7363, "CPP_EH_EXCEPTION"));
+    names.clear();
+    std::vector<String> lines;
+    if(!FileHelper::ReadAllLines(file, lines))
+        return false;
+    auto result = true;
+    for(const auto & line : lines)
+    {
+        auto split = StringUtils::Split(line, ' ');
+        if(split.size() < 2)
+        {
+            dprintf(QT_TRANSLATE_NOOP("DBG", "Invalid line in exception database: \"%s\"\n"), line.c_str());
+            result = false;
+            break;
+        }
+        duint code;
+        if(!convertNumber(split[0].c_str(), code, radix))
+        {
+            dprintf(QT_TRANSLATE_NOOP("DBG", "Failed to convert number in exception database \"%s\"\n"), split[0].c_str());
+            result = false;
+            break;
+        }
+        // TODO: Detect invalid constant names that is indistinguishable from numbers (deadbeef)
+        names.insert({ (unsigned int)code, split[1] });
+    }
+    return result;
 }
 
-const char* ExceptionCodeToName(unsigned int ExceptionCode)
+bool ErrorCodeInit(const String & errorFile)
 {
-    if(ExceptionNames.find(ExceptionCode) == ExceptionNames.end())
-        return nullptr;
+    return UniversalCodeInit(errorFile, ErrorNames, 10);
+}
 
-    return ExceptionNames[ExceptionCode];
+bool ExceptionCodeInit(const String & exceptionFile)
+{
+    return UniversalCodeInit(exceptionFile, ExceptionNames, 16);
+}
+
+bool ConstantCodeInit(const String & constantFile)
+{
+    std::unordered_map<unsigned int, String> names;
+    if(!UniversalCodeInit(constantFile, names, 0))
+        return false;
+    Constants.reserve(names.size());
+    for(const auto & it : names)
+        Constants.insert({ it.second, it.first });
+    return true;
+}
+
+bool ConstantFromName(const String & name, duint & value)
+{
+    auto found = Constants.find(name);
+    if(found == Constants.end())
+        return false;
+    value = found->second;
+    return true;
+}
+
+std::vector<CONSTANTINFO> ConstantList()
+{
+    std::vector<CONSTANTINFO> result;
+    for(auto it = Constants.begin(); it != Constants.end(); ++it)
+    {
+        CONSTANTINFO info;
+        info.name = it->first.c_str();
+        info.value = it->second;
+        result.push_back(info);
+    }
+    std::sort(result.begin(), result.end(), [](const CONSTANTINFO & a, const CONSTANTINFO & b)
+    {
+        return strcmp(a.name, b.name) < 0;
+    });
+    return result;
+}
+
+static bool ExceptionDatabaseNameToCode(const std::unordered_map<unsigned int, String>* db, const char* Name, unsigned int* ErrorCode)
+{
+    for(const auto & i : *db)
+    {
+        if(i.second.compare(Name) == 0)
+        {
+            *ErrorCode = i.first;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ExceptionNameToCode(const char* Name, unsigned int* ErrorCode)
+{
+    if(!ExceptionDatabaseNameToCode(&ExceptionNames, Name, ErrorCode))
+        return ExceptionDatabaseNameToCode(&NtStatusNames, Name, ErrorCode);
+    return true;
+}
+
+bool NtStatusCodeInit(const String & ntStatusFile)
+{
+    return UniversalCodeInit(ntStatusFile, NtStatusNames, 16);
+}
+
+static const String emptyString("");
+
+static const String & ExceptionDatabaseCodeToName(std::unordered_map<unsigned int, String>* db, unsigned int ErrorCode, bool* success)
+{
+    auto i = db->find(ErrorCode);
+    if(i == db->end())
+    {
+        *success = false;
+        return emptyString;
+    }
+    *success = true;
+    return i->second;
+}
+
+const String & ExceptionCodeToName(unsigned int ExceptionCode)
+{
+    bool success;
+    const String & name = ExceptionDatabaseCodeToName(&ExceptionNames, ExceptionCode, &success);
+    if(!success)
+        return ExceptionDatabaseCodeToName(&NtStatusNames, ExceptionCode, &success);
+    else
+        return name;
+}
+
+std::vector<CONSTANTINFO> ExceptionList()
+{
+    std::vector<CONSTANTINFO> result;
+    for(auto it = ExceptionNames.begin(); it != ExceptionNames.end(); ++it)
+    {
+        CONSTANTINFO info;
+        info.name = it->second.c_str();
+        info.value = it->first;
+        result.push_back(info);
+    }
+    for(auto it = NtStatusNames.begin(); it != NtStatusNames.end(); ++it)
+    {
+        CONSTANTINFO info;
+        info.name = it->second.c_str();
+        info.value = it->first;
+        result.push_back(info);
+    }
+    return result;
+}
+
+const String & NtStatusCodeToName(unsigned int NtStatusCode)
+{
+    bool success;
+    return ExceptionDatabaseCodeToName(&NtStatusNames, NtStatusCode, &success);
+}
+
+const String & ErrorCodeToName(unsigned int ErrorCode)
+{
+    bool success;
+    return ExceptionDatabaseCodeToName(&ErrorNames, ErrorCode, &success);
+}
+
+std::vector<CONSTANTINFO> ErrorCodeList()
+{
+    std::vector<CONSTANTINFO> result;
+    for(auto it = ErrorNames.begin(); it != ErrorNames.end(); ++it)
+    {
+        CONSTANTINFO info;
+        info.name = it->second.c_str();
+        info.value = it->first;
+        result.push_back(info);
+    }
+    std::sort(result.begin(), result.end(), [](const CONSTANTINFO & a, const CONSTANTINFO & b)
+    {
+        return strcmp(a.name, b.name) < 0;
+    });
+    return result;
+}
+
+bool SyscallInit()
+{
+    auto retrieveSyscalls = [](const char* moduleName)
+    {
+        auto moduleHandle = GetModuleHandleA(moduleName);
+        if(!moduleHandle)
+            return false;
+        char szModulePath[MAX_PATH];
+        if(!GetModuleFileNameA(moduleHandle, szModulePath, _countof(szModulePath)))
+            return false;
+        auto info = MODINFO::load(0, 1, szModulePath, false, nullptr, false);
+        if(!info)
+            return false;
+        for(const MODEXPORT & exportEntry : info->exports)
+        {
+            if(strncmp(exportEntry.name.c_str(), "Nt", 2) != 0)
+                continue;
+            auto exportData = (const unsigned char*)ModRvaToOffset(info->fileMapVA, info->headers, info->loadedSize, exportEntry.rva);
+            if(!exportData)
+                continue;
+            // https://github.com/mrexodia/TitanHide/blob/1c6ba9796e320f399f998b23fba2729122597e87/TitanHide/ntdll.cpp#L75
+            DWORD index = -1;
+            for(int i = 0; i < 32; i++)
+            {
+                if(exportData[i] == 0xC2 || exportData[i] == 0xC3)   //RET
+                {
+                    break;
+                }
+                if(exportData[i] == 0xB8)   //mov eax,X
+                {
+                    index = *(DWORD*)(exportData + i + 1);
+                    break;
+                }
+            }
+            if(index != -1)
+                SyscallIndices.emplace(index, exportEntry.name);
+        }
+        return true;
+    };
+
+    // See: https://github.com/x64dbg/ScyllaHide/blob/6817d32581b7a420322f34e36b1a1c8c3e4b434c/Scylla/Win32kSyscalls.h
+    auto result = retrieveSyscalls("ntdll.dll");
+    auto buildNumber = BridgeGetNtBuildNumber();
+
+    if(buildNumber >= 14393)
+    {
+        result = result && retrieveSyscalls("win32u.dll");
+    }
+    else
+    {
+        SyscallIndices.reserve(sizeof(Win32kSyscalls) / sizeof(Win32kSyscalls[0]));
+        for(auto & syscall : Win32kSyscalls)
+        {
+            auto index = syscall.GetSyscallIndex((USHORT)buildNumber, ArchValue(true, false));
+            if(index != -1)
+                SyscallIndices.insert({ index, syscall.Name });
+        }
+    }
+
+    // Populate the name map
+    for(const auto & itr : SyscallIndices)
+    {
+        SyscallNames.emplace(itr.second, itr.first);
+    }
+
+    // Also allow lookup with only the least significant 14 bits
+    // Reference: https://alice.climent-pommeret.red/posts/a-syscall-journey-in-the-windows-kernel/
+    for(const auto & itr : SyscallIndices)
+    {
+        auto truncated = itr.first & 0x3FFF;
+        if(truncated != itr.first)
+        {
+            SyscallIndices.emplace(truncated, itr.second);
+        }
+    }
+
+    return result;
+}
+
+const String & SyscallToName(unsigned int index)
+{
+    auto found = SyscallIndices.find(index & 0x3FFF);
+    return found != SyscallIndices.end() ? found->second : emptyString;
+}
+
+unsigned int SyscallToId(const String & name)
+{
+    if(name.find("Zw") == 0)
+    {
+        return SyscallToId("Nt" + name.substr(2));
+    }
+
+    auto found = SyscallNames.find(name);
+    return found != SyscallNames.end() ? found->second : -1;
 }

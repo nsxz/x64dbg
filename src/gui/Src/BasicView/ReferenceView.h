@@ -1,27 +1,31 @@
-#ifndef REFERENCEVIEW_H
-#define REFERENCEVIEW_H
+#pragma once
 
 #include <QProgressBar>
 #include <QLabel>
-#include "SearchListView.h"
+#include "StdSearchListView.h"
 
-class ReferenceView : public SearchListView
+class QTabWidget;
+
+class ReferenceView : public StdSearchListView
 {
     Q_OBJECT
 
 public:
-    ReferenceView();
+    ReferenceView(bool sourceView = false, QWidget* parent = nullptr);
     void setupContextMenu();
+    void connectBridge();
     void disconnectBridge();
+    int progress() const;
+    int currentTaskProgress() const;
 
-private slots:
-    void addColumnAt(int width, QString title);
-    void setRowCount(dsint count);
-    void setCellContent(int r, int c, QString s);
-    void reloadData();
+public slots:
+    void addColumnAtRef(int width, QString title);
+
+    void setRowCount(duint count) override;
+
     void setSingleSelection(int index, bool scroll);
-    void setSearchStartCol(int col);
-    void referenceContextMenu(QMenu* wMenu);
+    void addCommand(QString title, QString command);
+    void referenceContextMenu(QMenu* menu);
     void followAddress();
     void followDumpAddress();
     void followApiAddress();
@@ -32,12 +36,18 @@ private slots:
     void setBreakpointOnAllApiCalls();
     void removeBreakpointOnAllApiCalls();
     void toggleBookmark();
+    void copyReferenceAddress();
     void refreshShortcutsSlot();
     void referenceSetProgressSlot(int progress);
     void referenceSetCurrentTaskProgressSlot(int progress, QString taskTitle);
+    void searchSelectionChanged(duint index);
+    void reloadDataSlot();
 
 signals:
     void showCpu();
+
+private slots:
+    void referenceExecCommand();
 
 private:
     QProgressBar* mSearchTotalProgress;
@@ -47,13 +57,16 @@ private:
     QAction* mFollowApiAddress;
     QAction* mToggleBreakpoint;
     QAction* mToggleBookmark;
+    QAction* mCopyReferenceAddress;
     QAction* mSetBreakpointOnAllCommands;
     QAction* mRemoveBreakpointOnAllCommands;
     QAction* mSetBreakpointOnAllApiCalls;
     QAction* mRemoveBreakpointOnAllApiCalls;
+    bool mUpdateCountLabel = false;
     QLabel* mCountTotalLabel;
-
-    bool mFollowDumpDefault;
+    QVector<QString> mCommandTitles;
+    QVector<QString> mCommands;
+    QTabWidget* mParent;
 
     enum BPSetAction
     {
@@ -63,8 +76,8 @@ private:
         Remove
     };
 
-    void setBreakpointAt(int row, BPSetAction action);
+    void setBreakpointAt(duint row, BPSetAction action);
     dsint apiAddressFromString(const QString & s);
-};
 
-#endif // REFERENCEVIEW_H
+    void mouseReleaseEvent(QMouseEvent* event) override;
+};

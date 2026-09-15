@@ -1,8 +1,8 @@
-#ifndef CLOSEDIALOG_H
-#define CLOSEDIALOG_H
+#pragma once
 
 #include <QDialog>
-#include <QCloseEvent>
+
+class QCloseEvent;
 
 namespace Ui
 {
@@ -14,7 +14,7 @@ class CloseDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit CloseDialog(QWidget* parent = 0);
+    explicit CloseDialog(QWidget* parent = nullptr);
     ~CloseDialog();
     void closeEvent(QCloseEvent* event);
     void allowClose();
@@ -23,5 +23,3 @@ private:
     Ui::CloseDialog* ui;
     bool bCanClose;
 };
-
-#endif // CLOSEDIALOG_H

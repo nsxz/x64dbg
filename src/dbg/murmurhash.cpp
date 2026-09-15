@@ -7,6 +7,9 @@
 // compile and run any of them on any platform, but your performance with the
 // non-native version will be less than optimal.
 
+// x64dbg: changed 'int len' to 'size_t len' and converted loops to forward
+// indexing to support files >2GB. See: https://github.com/x64dbg/x64dbg/issues/3583
+
 #include "murmurhash.h"
 
 //-----------------------------------------------------------------------------
@@ -125,7 +128,7 @@ inline uint64_t rotl64(uint64_t x, int8_t r)
  @return An uint32_t.
  */
 
-FORCE_INLINE uint32_t getblock32(const uint32_t* p, int i)
+FORCE_INLINE uint32_t getblock32(const uint32_t* p, size_t i)
 {
     return p[i];
 }
@@ -141,7 +144,7 @@ FORCE_INLINE uint32_t getblock32(const uint32_t* p, int i)
  @return An uint64_t.
  */
 
-FORCE_INLINE uint64_t getblock64(const uint64_t* p, int i)
+FORCE_INLINE uint64_t getblock64(const uint64_t* p, size_t i)
 {
     return p[i];
 }
@@ -204,11 +207,11 @@ FORCE_INLINE uint64_t fmix64(uint64_t k)
  @param [in,out] out If non-null, the out.
  */
 
-void MurmurHash3_x86_32(const void* key, int len,
+void MurmurHash3_x86_32(const void* key, size_t len,
                         uint32_t seed, void* out)
 {
     const uint8_t* data = (const uint8_t*)key;
-    const int nblocks = len / 4;
+    const size_t nblocks = len / 4;
 
     uint32_t h1 = seed;
 
@@ -218,9 +221,9 @@ void MurmurHash3_x86_32(const void* key, int len,
     //----------
     // body
 
-    const uint32_t* blocks = (const uint32_t*)(data + nblocks * 4);
+    const uint32_t* blocks = (const uint32_t*)(data);
 
-    for(int i = -nblocks; i; i++)
+    for(size_t i = 0; i < nblocks; i++)
     {
         uint32_t k1 = getblock32(blocks, i);
 
@@ -277,11 +280,11 @@ void MurmurHash3_x86_32(const void* key, int len,
  @param [in,out] out If non-null, the out.
  */
 
-void MurmurHash3_x86_128(const void* key, const int len,
+void MurmurHash3_x86_128(const void* key, const size_t len,
                          uint32_t seed, void* out)
 {
     const uint8_t* data = (const uint8_t*)key;
-    const int nblocks = len / 16;
+    const size_t nblocks = len / 16;
 
     uint32_t h1 = seed;
     uint32_t h2 = seed;
@@ -296,9 +299,9 @@ void MurmurHash3_x86_128(const void* key, const int len,
     //----------
     // body
 
-    const uint32_t* blocks = (const uint32_t*)(data + nblocks * 16);
+    const uint32_t* blocks = (const uint32_t*)(data);
 
-    for(int i = -nblocks; i; i++)
+    for(size_t i = 0; i < nblocks; i++)
     {
         uint32_t k1 = getblock32(blocks, i * 4 + 0);
         uint32_t k2 = getblock32(blocks, i * 4 + 1);
@@ -451,11 +454,11 @@ void MurmurHash3_x86_128(const void* key, const int len,
  @param [in,out] out If non-null, the out.
  */
 
-void MurmurHash3_x64_128(const void* key, const int len,
+void MurmurHash3_x64_128(const void* key, const size_t len,
                          const uint32_t seed, void* out)
 {
     const uint8_t* data = (const uint8_t*)key;
-    const int nblocks = len / 16;
+    const size_t nblocks = len / 16;
 
     uint64_t h1 = seed;
     uint64_t h2 = seed;
@@ -468,7 +471,7 @@ void MurmurHash3_x64_128(const void* key, const int len,
 
     const uint64_t* blocks = (const uint64_t*)(data);
 
-    for(int i = 0; i < nblocks; i++)
+    for(size_t i = 0; i < nblocks; i++)
     {
         uint64_t k1 = getblock64(blocks, i * 2 + 0);
         uint64_t k2 = getblock64(blocks, i * 2 + 1);

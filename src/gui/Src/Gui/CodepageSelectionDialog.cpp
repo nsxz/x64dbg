@@ -2,6 +2,7 @@
 #include "ui_CodepageSelectionDialog.h"
 #include "Bridge.h"
 #include <QTextCodec>
+#include "MiscUtil.h"
 
 CodepageSelectionDialog::CodepageSelectionDialog(QWidget* parent) :
     QDialog(parent),
@@ -9,9 +10,8 @@ CodepageSelectionDialog::CodepageSelectionDialog(QWidget* parent) :
 {
     ui->setupUi(this);
     setModal(true);
-    setFixedSize(this->size()); //fixed size
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
-    setWindowIcon(QIcon(":/icons/images/codepage.png"));
+    setWindowIcon(DIcon("codepage"));
     for(auto & name : QTextCodec::availableCodecs())
     {
         auto codec = QTextCodec::codecForName(name);

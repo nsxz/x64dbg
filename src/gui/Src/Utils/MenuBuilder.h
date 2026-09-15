@@ -1,99 +1,71 @@
-#ifndef MENUBUILDER
-#define MENUBUILDER
+#pragma once
 
 #include <QAction>
 #include <QMenu>
 #include <functional>
 
+/**
+ * @brief The MenuBuilder class implements the dynamic context menu system for many views.
+ */
 class MenuBuilder : public QObject
 {
     Q_OBJECT
 public:
     typedef std::function<bool(QMenu*)> BuildCallback;
 
-    inline MenuBuilder(QObject* parent, BuildCallback callback = nullptr)
+    explicit MenuBuilder(QObject* parent, BuildCallback callback = nullptr)
         : QObject(parent),
           _callback(callback)
     {
     }
 
-    inline void addSeparator()
+    void loadFromConfig(const char* id = nullptr);
+
+    void addSeparator()
     {
         _containers.push_back(Container());
     }
 
-    inline QAction* addAction(QAction* action)
+    QAction* addAction(QAction* action)
     {
         _containers.push_back(Container(action));
         return action;
     }
 
-    inline QAction* addAction(QAction* action, BuildCallback callback)
+    QAction* addAction(QAction* action, BuildCallback callback)
     {
         addBuilder(new MenuBuilder(action->parent(), callback))->addAction(action);
         return action;
     }
 
-    inline QMenu* addMenu(QMenu* menu)
+    QMenu* addMenu(QMenu* menu)
     {
         _containers.push_back(Container(menu));
         return menu;
     }
 
-    inline QMenu* addMenu(QMenu* submenu, BuildCallback callback)
-    {
-        addBuilder(new MenuBuilder(submenu->parent(), [submenu, callback](QMenu * menu)
-        {
-            submenu->clear();
-            if(callback(submenu))
-                menu->addMenu(submenu);
-            return true;
-        }));
-        return submenu;
-    }
+    QMenu* addMenu(QMenu* submenu, BuildCallback callback);
 
-    inline QMenu* addMenu(QMenu* submenu, MenuBuilder* builder)
-    {
-        addBuilder(new MenuBuilder(submenu->parent(), [submenu, builder](QMenu * menu)
-        {
-            submenu->clear();
-            builder->build(submenu);
-            menu->addMenu(submenu);
-            return true;
-        }));
-        return submenu;
-    }
+    QMenu* addMenu(QMenu* submenu, MenuBuilder* builder);
 
-    inline MenuBuilder* addBuilder(MenuBuilder* builder)
+    MenuBuilder* addBuilder(MenuBuilder* builder)
     {
         _containers.push_back(Container(builder));
         return builder;
     }
 
-    inline void build(QMenu* menu) const
+    QString getText(size_t id) const;
+
+    QString getId() const
     {
-        if(_callback && !_callback(menu))
-            return;
-        for(const Container & container : _containers)
-        {
-            switch(container.type)
-            {
-            case Container::Separator:
-                menu->addSeparator();
-                break;
-            case Container::Action:
-                menu->addAction(container.action);
-                break;
-            case Container::Menu:
-                menu->addMenu(container.menu);
-                break;
-            case Container::Builder:
-                container.builder->build(menu);
-                break;
-            default:
-                break;
-            }
-        }
+        return id;
+    }
+
+    bool build(QMenu* menu) const;
+
+    bool empty() const
+    {
+        return _containers.empty();
     }
 
 private:
@@ -107,24 +79,25 @@ private:
             Builder
         };
 
-        inline Container()
-            : type(Separator)
+        Container()
+            : type(Separator),
+              action(nullptr)
         {
         }
 
-        inline Container(QAction* action)
+        Container(QAction* action)
             : type(Action),
               action(action)
         {
         }
 
-        inline Container(QMenu* menu)
+        Container(QMenu* menu)
             : type(Menu),
               menu(menu)
         {
         }
 
-        inline Container(MenuBuilder* builder)
+        Container(MenuBuilder* builder)
             : type(Builder),
               builder(builder)
         {
@@ -134,14 +107,15 @@ private:
         union
         {
             QAction* action;
-            QMenu* menu ;
+            QMenu* menu;
             MenuBuilder* builder;
         };
     };
 
     BuildCallback _callback;
+    QString id;
     std::vector<Container> _containers;
+private slots:
+    void unregisterMenuBuilder();
 };
-
-#endif // MENUBUILDER
 

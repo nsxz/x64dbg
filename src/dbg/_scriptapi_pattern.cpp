@@ -9,7 +9,7 @@ SCRIPT_EXPORT duint Script::Pattern::Find(unsigned char* data, duint datasize, c
 
 SCRIPT_EXPORT duint Script::Pattern::FindMem(duint start, duint size, const char* pattern)
 {
-    Memory<unsigned char*> data(size, "Script::Pattern::FindMem::data");
+    ::Memory<unsigned char*> data(size, "Script::Pattern::FindMem::data");
     if(!MemRead(start, data(), size))
         return -1;
     auto found = Pattern::Find(data(), data.size(), pattern);
@@ -23,7 +23,7 @@ SCRIPT_EXPORT void Script::Pattern::Write(unsigned char* data, duint datasize, c
 
 SCRIPT_EXPORT void Script::Pattern::WriteMem(duint start, duint size, const char* pattern)
 {
-    Memory<unsigned char*> data(size, "Script::Pattern::WriteMem::data");
+    ::Memory<unsigned char*> data(size, "Script::Pattern::WriteMem::data");
     if(!MemRead(start, data(), data.size()))
         return;
     patternwrite(data(), data.size(), pattern);
@@ -37,7 +37,7 @@ SCRIPT_EXPORT bool Script::Pattern::SearchAndReplace(unsigned char* data, duint 
 
 SCRIPT_EXPORT bool Script::Pattern::SearchAndReplaceMem(duint start, duint size, const char* searchpattern, const char* replacepattern)
 {
-    Memory<unsigned char*> data(size, "Script::Pattern::SearchAndReplaceMem::data");
+    ::Memory<unsigned char*> data(size, "Script::Pattern::SearchAndReplaceMem::data");
     if(!MemRead(start, data(), size))
         return false;
     auto found = patternfind(data(), data.size(), searchpattern);

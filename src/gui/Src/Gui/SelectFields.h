@@ -1,8 +1,8 @@
-#ifndef SELECTFIELDS_H
-#define SELECTFIELDS_H
+#pragma once
 
 #include <QDialog>
-#include <QListWidget>
+
+class QListWidget;
 
 namespace Ui
 {
@@ -14,12 +14,10 @@ class SelectFields : public QDialog
     Q_OBJECT
 
 public:
-    explicit SelectFields(QWidget* parent = 0);
-    QListWidget* GetList(void);
+    explicit SelectFields(QWidget* parent = nullptr);
+    QListWidget* GetList();
     ~SelectFields();
 
 private:
     Ui::SelectFields* ui;
 };
-
-#endif // SELECTFIELDS_H

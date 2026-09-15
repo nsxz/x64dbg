@@ -1,16 +1,14 @@
-#ifndef HEXVALIDATOR_H
-#define HEXVALIDATOR_H
+#pragma once
+
 #include <QValidator>
 
 class HexValidator : public QValidator
 {
     Q_OBJECT
 public:
-    explicit HexValidator(QObject* parent = 0);
+    explicit HexValidator(QObject* parent = nullptr);
     ~HexValidator();
 
     void fixup(QString & input) const;
     State validate(QString & input, int & pos) const;
 };
-
-#endif // HEXVALIDATOR_H

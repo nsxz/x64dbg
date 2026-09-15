@@ -1,5 +1,7 @@
 #include "patternfind.h"
 #include <vector>
+#include <algorithm>
+#include <memory>
 
 using namespace std;
 
@@ -32,6 +34,12 @@ static inline int hexchtoint(char ch)
 bool patterntransform(const string & patterntext, vector<PatternByte> & pattern)
 {
     pattern.clear();
+
+    //reject patterns with unsupported charcters
+    for(char ch : patterntext)
+        if(ch != '?' && ch != ' ' && !isHex(ch))
+            return false;
+
     string formattext = formathexpattern(patterntext);
     int len = (int)formattext.length();
     if(!len)
@@ -43,17 +51,15 @@ bool patterntransform(const string & patterntext, vector<PatternByte> & pattern)
         len++;
     }
 
-    PatternByte newByte;
+    PatternByte newByte = {};
     for(int i = 0, j = 0; i < len; i++)
     {
-        if(formattext[i] == '?') //wildcard
+        int shift = j ? 0 : 4;
+
+        if(formattext[i] != '?')
         {
-            newByte.nibble[j].wildcard = true; //match anything
-        }
-        else //hex
-        {
-            newByte.nibble[j].wildcard = false;
-            newByte.nibble[j].data = hexchtoint(formattext[i]) & 0xF;
+            newByte.data |= (hexchtoint(formattext[i]) & 0xF) << shift;
+            newByte.mask |= 0xf << shift;
         }
 
         j++;
@@ -61,28 +67,19 @@ bool patterntransform(const string & patterntext, vector<PatternByte> & pattern)
         {
             j = 0;
             pattern.push_back(newByte);
+            newByte = {};
         }
     }
+
+    //reject wildcard only patterns
+    bool allWildcard = std::all_of(pattern.begin(), pattern.end(), [](const PatternByte & patternByte)
+    {
+        return patternByte.mask == 0x00;
+    });
+    if(allWildcard)
+        return false;
+
     return true;
-}
-
-static inline bool patternmatchbyte(unsigned char byte, const PatternByte & pbyte)
-{
-    int matched = 0;
-
-    unsigned char n1 = (byte >> 4) & 0xF;
-    if(pbyte.nibble[0].wildcard)
-        matched++;
-    else if(pbyte.nibble[0].data == n1)
-        matched++;
-
-    unsigned char n2 = byte & 0xF;
-    if(pbyte.nibble[1].wildcard)
-        matched++;
-    else if(pbyte.nibble[1].data == n2)
-        matched++;
-
-    return (matched == 2);
 }
 
 size_t patternfind(const unsigned char* data, size_t datasize, const char* pattern, int* patternsize)
@@ -94,36 +91,9 @@ size_t patternfind(const unsigned char* data, size_t datasize, const char* patte
     return patternfind(data, datasize, searchpattern);
 }
 
-size_t patternfind(const unsigned char* data, size_t datasize, unsigned char* pattern, size_t patternsize)
-{
-    if(patternsize > datasize)
-        patternsize = datasize;
-    for(size_t i = 0, pos = 0; i < datasize; i++)
-    {
-        if(data[i] == pattern[pos])
-        {
-            pos++;
-            if(pos == patternsize)
-                return i - patternsize + 1;
-        }
-        else if(pos > 0)
-        {
-            i -= pos;
-            pos = 0; //reset current pattern position
-        }
-    }
-    return -1;
-}
-
 static inline void patternwritebyte(unsigned char* byte, const PatternByte & pbyte)
 {
-    unsigned char n1 = (*byte >> 4) & 0xF;
-    unsigned char n2 = *byte & 0xF;
-    if(!pbyte.nibble[0].wildcard)
-        n1 = pbyte.nibble[0].data;
-    if(!pbyte.nibble[1].wildcard)
-        n2 = pbyte.nibble[1].data;
-    *byte = ((n1 << 4) & 0xF0) | (n2 & 0xF);
+    *byte = pbyte.data | (*byte & ~pbyte.mask);
 }
 
 void patternwrite(unsigned char* data, size_t datasize, const char* pattern)
@@ -148,22 +118,87 @@ bool patternsnr(unsigned char* data, size_t datasize, const char* searchpattern,
     return true;
 }
 
-size_t patternfind(const unsigned char* data, size_t datasize, const std::vector<PatternByte> & pattern)
+struct PatternNeedle
+{
+    unsigned char data;
+    unsigned char mask;
+    size_t offset;
+};
+
+size_t patternfind(const unsigned char* data, size_t datasize, const std::vector<PatternByte>& pattern)
 {
     size_t searchpatternsize = pattern.size();
-    for(size_t i = 0, pos = 0; i < datasize; i++)  //search for the pattern
+
+    if(datasize < searchpatternsize)
+        return -1;
+
+    std::unique_ptr<PatternNeedle[]> const needles(new PatternNeedle[searchpatternsize]);
+    size_t n_needles = 0;
+
+    // Collect all of the literal bytes.
+    // The less common bytes tend to be at the end, so iterate back-to-front.
+    for(size_t i = searchpatternsize; i--;)
     {
-        if(patternmatchbyte(data[i], pattern.at(pos)))  //check if our pattern matches the current byte
-        {
-            pos++;
-            if(pos == searchpatternsize)  //everything matched
-                return i - searchpatternsize + 1;
-        }
-        else if(pos > 0)  //fix by Computer_Angel
-        {
-            i -= pos;
-            pos = 0; //reset current pattern position
-        }
+        if(pattern[i].mask == 0xFF)
+            needles[n_needles++] = { pattern[i].data, pattern[i].mask, i };
     }
+
+    size_t literals = n_needles;
+
+    // Don't forget the partially masked bytes.
+    for(size_t i = searchpatternsize; i--;)
+    {
+        if(pattern[i].mask != 0x00 && pattern[i].mask != 0xFF)
+            needles[n_needles++] = { pattern[i].data, pattern[i].mask, i };
+    }
+
+    if(n_needles == 0)
+        return -1;
+
+    const unsigned char* here = data;
+    const unsigned char* end = &data[datasize - (searchpatternsize - 1)];
+
+    do
+    {
+        if(literals)
+        {
+            PatternNeedle needle = needles[0];
+
+            // On Windows, memchr is not as fast as it could be, so MSVC's std::find uses its own SIMD implementation.
+            here = std::find(here + needle.offset, end + needle.offset, needle.data) - needle.offset;
+            if(here == end)
+                break;
+
+            for(size_t i = 1; i < literals; ++i)
+            {
+                needle = needles[i];
+
+                if(here[needle.offset] != needle.data)
+                {
+                    // Swap this mismatched needle with the previously matched one.
+                    // By constantly re-adjusting the order of the needles, the least common one should be moved to the front,
+                    // maximizing the time spent inside std::find, and minimizing the time spent checking the rest of the bytes.
+                    needles[i] = needles[i - 1];
+                    needles[i - 1] = needle;
+                    goto skip;
+                }
+            }
+        }
+
+        for(size_t i = literals; i < n_needles; ++i)
+        {
+            PatternNeedle needle = needles[i];
+
+            if((here[needle.offset] & needle.mask) != needle.data)
+                goto skip;
+        }
+
+        return here - data;
+
+skip:
+        ++here;
+    }
+    while(here != end);
+
     return -1;
 }

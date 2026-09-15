@@ -1,5 +1,51 @@
 #include "_scriptapi_symbol.h"
 #include "_scriptapi_label.h"
+#include "symbolinfo.h"
+
+struct cbSymbolEnumCtx
+{
+    const SYMBOLMODULEINFO* module;
+    std::vector<Script::Symbol::SymbolInfo>* symbols;
+};
+
+static bool cbSymbolEnum(const SYMBOLPTR* ptr, void* user)
+{
+
+    auto ctx = (cbSymbolEnumCtx*)user;
+    SYMBOLINFO info;
+    DbgGetSymbolInfo(ptr, &info);
+
+    const bool hasUndecoratedName = (0 != info.undecoratedSymbol) && (0 != info.undecoratedSymbol[0]);
+    const char* symbolName = hasUndecoratedName ? info.undecoratedSymbol : info.decoratedSymbol;
+
+    Script::Symbol::SymbolInfo symbol = {};
+    strncpy_s(symbol.mod, sizeof(symbol.mod), ctx->module->name, sizeof(symbol.mod) - 1);
+    symbol.rva = info.addr - ctx->module->base;
+    strncpy_s(symbol.name, sizeof(symbol.name), symbolName, sizeof(symbol.name) - 1);
+    symbol.manual = false;
+    switch(info.type)
+    {
+    case sym_import:
+        symbol.type = Script::Symbol::Import;
+        break;
+    case sym_export:
+        symbol.type = Script::Symbol::Export;
+        break;
+    case sym_symbol:
+        symbol.type = Script::Symbol::Function;
+        break;
+    default:
+        __debugbreak();
+    }
+
+    if(info.freeDecorated)
+        BridgeFree(info.decoratedSymbol);
+    if(info.freeUndecorated)
+        BridgeFree(info.undecoratedSymbol);
+
+    ctx->symbols->push_back(symbol);
+    return true;
+}
 
 SCRIPT_EXPORT bool Script::Symbol::GetList(ListOf(SymbolInfo) list)
 {
@@ -19,6 +65,18 @@ SCRIPT_EXPORT bool Script::Symbol::GetList(ListOf(SymbolInfo) list)
         symbol.type = Function;
         symbols.push_back(symbol);
     }
+
+    std::vector<SYMBOLMODULEINFO> modules;
+    SymGetModuleList(&modules);
+    cbSymbolEnumCtx ctx;
+    ctx.symbols = &symbols;
+
+    for(const auto & mod : modules)
+    {
+        ctx.module = &mod;
+        DbgSymbolEnumFromCache(mod.base, cbSymbolEnum, &ctx);
+    }
+
     //TODO: enumerate actual symbols + virtual symbols (sub_XXXXXX) + imports + exports in addition to user-defined labels.
     return BridgeList<SymbolInfo>::CopyData(list, symbols);
 }

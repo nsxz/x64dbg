@@ -6,24 +6,9 @@
 
 #include "disasm_fast.h"
 #include "memory.h"
+#include "datainst_helper.h"
 
-static MEMORY_SIZE argsize2memsize(int argsize)
-{
-    switch(argsize)
-    {
-    case 8:
-        return size_byte;
-    case 16:
-        return size_word;
-    case 32:
-        return size_dword;
-    case 64:
-        return size_qword;
-    }
-    return size_byte;
-}
-
-void fillbasicinfo(Capstone* cp, BASIC_INSTRUCTION_INFO* basicinfo, bool instrText)
+void fillbasicinfo(Zydis* cp, BASIC_INSTRUCTION_INFO* basicinfo, bool instrText)
 {
     //zero basicinfo
     memset(basicinfo, 0, sizeof(BASIC_INSTRUCTION_INFO));
@@ -33,53 +18,57 @@ void fillbasicinfo(Capstone* cp, BASIC_INSTRUCTION_INFO* basicinfo, bool instrTe
     //instruction size
     basicinfo->size = cp->Size();
     //branch/call info
-    if(cp->InGroup(CS_GRP_CALL))
+    if(cp->IsCall())
     {
         basicinfo->branch = true;
         basicinfo->call = true;
     }
-    else if(cp->InGroup(CS_GRP_JUMP) || cp->IsLoop())
+    else if(cp->IsJump() || cp->IsLoop())
     {
         basicinfo->branch = true;
     }
     //handle operands
-    for(int i = 0; i < cp->x86().op_count; i++)
+    for(int i = 0; i < cp->OpCount(); i++)
     {
-        const cs_x86_op & op = cp->x86().operands[i];
+        const auto & op = (*cp)[i];
         switch(op.type)
         {
-        case X86_OP_IMM:
+        case ZYDIS_OPERAND_TYPE_IMMEDIATE:
         {
             if(basicinfo->branch)
             {
                 basicinfo->type |= TYPE_ADDR;
-                basicinfo->addr = duint(op.imm);
-                basicinfo->value.value = duint(op.imm);
+                basicinfo->addr = duint(op.imm.value.u);
+                basicinfo->value.value = duint(op.imm.value.u);
             }
             else
             {
                 basicinfo->type |= TYPE_VALUE;
-                basicinfo->value.size = VALUE_SIZE(op.size);
-                basicinfo->value.value = duint(op.imm);
+                basicinfo->value.size = VALUE_SIZE(op.size / 8);
+                basicinfo->value.value = duint(op.imm.value.u);
             }
         }
         break;
 
-        case X86_OP_MEM:
+        case ZYDIS_OPERAND_TYPE_MEMORY:
         {
-            const x86_op_mem & mem = op.mem;
+            const auto & mem = op.mem;
             if(instrText)
-                strcpy_s(basicinfo->memory.mnemonic, cp->OperandText(i).c_str());
-            basicinfo->memory.size = MEMORY_SIZE(op.size);
-            if(op.mem.base == X86_REG_RIP)  //rip-relative
             {
-                basicinfo->memory.value = ULONG_PTR(cp->Address() + op.mem.disp + basicinfo->size);
+                auto opText = cp->OperandText(i);
+                StringUtils::ReplaceAll(opText, "0x", "");
+                strcpy_s(basicinfo->memory.mnemonic, opText.c_str());
+            }
+            basicinfo->memory.size = MEMORY_SIZE(op.size / 8);
+            if(op.mem.base == ZYDIS_REGISTER_RIP) //rip-relative
+            {
+                basicinfo->memory.value = ULONG_PTR(cp->Address() + op.mem.disp.value + basicinfo->size);
                 basicinfo->type |= TYPE_MEMORY;
             }
-            else if(mem.disp)
+            else if(mem.disp.value)
             {
                 basicinfo->type |= TYPE_MEMORY;
-                basicinfo->memory.value = ULONG_PTR(mem.disp);
+                basicinfo->memory.value = ULONG_PTR(mem.disp.value);
             }
         }
         break;
@@ -94,19 +83,30 @@ bool disasmfast(const unsigned char* data, duint addr, BASIC_INSTRUCTION_INFO* b
 {
     if(!data || !basicinfo)
         return false;
-    Capstone cp;
-    if(!cp.Disassemble(addr, data, MAX_DISASM_BUFFER))
+    Zydis zydis;
+    zydis.Disassemble(addr, data, MAX_DISASM_BUFFER);
+    if(trydisasmfast(data, addr, basicinfo, zydis.Success() ? zydis.Size() : 1))
+        return true;
+    if(!zydis.Success())
     {
         strcpy_s(basicinfo->instruction, "???");
         basicinfo->size = 1;
         return false;
     }
-    fillbasicinfo(&cp, basicinfo);
+    fillbasicinfo(&zydis, basicinfo);
     return true;
+}
+
+void disasm(Zydis & zydis, duint addr)
+{
+    unsigned char data[MAX_DISASM_BUFFER];
+    if(MemRead(addr, data, sizeof(data)))
+        zydis.Disassemble(addr, data);
 }
 
 bool disasmfast(duint addr, BASIC_INSTRUCTION_INFO* basicinfo, bool cache)
 {
+    // unsigned int because of data encoding (likely could be a bit smaller though, this is 4*16=64 bytes)
     unsigned int data[16];
     if(!MemRead(addr, data, sizeof(data), nullptr, cache))
         return false;

@@ -1,10 +1,10 @@
-#ifndef CPUARGUMENTWIDGET_H
-#define CPUARGUMENTWIDGET_H
+#pragma once
 
 #include <QWidget>
 #include <vector>
 #include "StdTable.h"
 #include "StringUtil.h"
+#include "Architecture.h"
 
 namespace Ui
 {
@@ -16,14 +16,14 @@ class CPUArgumentWidget : public QWidget
     Q_OBJECT
 
 public:
-    explicit CPUArgumentWidget(QWidget* parent = 0);
+    explicit CPUArgumentWidget(Architecture* architecture, QWidget* parent = nullptr);
     ~CPUArgumentWidget();
 
     static QString defaultArgFormat(const QString & format, const QString & expression)
     {
         if(format.length())
             return format;
-        return QString("%1 {a:%1}").arg(expression);
+        return QString("%1 {p:%1} {a:%1}").arg(expression).trimmed();
     }
 
     static QString defaultArgName(const QString & name, int argN)
@@ -37,11 +37,11 @@ public:
     {
         if(argText.length())
             return QString("%1: %2").arg(argName).arg(argText);
-        return "";
+        return QString();
     }
 
 public slots:
-    void disassembledAtSlot(dsint addr, dsint cip, bool history, dsint newTableOffset);
+    void disassembleAtSlot(duint addr, duint cip);
     void refreshData();
 
 private slots:
@@ -49,6 +49,7 @@ private slots:
     void followDisasmSlot();
     void followDumpSlot();
     void followStackSlot();
+    void onCopyToClipboardAction();
     void on_comboCallingConvention_currentIndexChanged(int index);
     void on_spinArgCount_valueChanged(int arg1);
     void on_checkBoxLock_stateChanged(int arg1);
@@ -87,14 +88,21 @@ private:
         QString name;
         int stackArgCount;
         QString stackLocation32;
+        duint stackOffset32;
         duint callOffset32;
         QString stackLocation64;
         duint callOffset64;
+        duint stackOffset64;
         std::vector<Argument> arguments;
 
         const QString & getStackLocation() const
         {
             return ArchValue(stackLocation32, stackLocation64);
+        }
+
+        const duint getStackOffset() const
+        {
+            return ArchValue(stackOffset32, stackOffset64);
         }
 
         const duint & getCallOffset() const
@@ -107,22 +115,32 @@ private:
             arguments.push_back(argument);
         }
 
-        explicit CallingConvention(const QString & name, int stackArgCount = 0, const QString & stackLocation32 = "esp", duint callOffset32 = sizeof(duint), const QString & stackLocation64 = "rsp", duint callOffset64 = sizeof(duint))
+        explicit CallingConvention(const QString & name,
+                                   int stackArgCount = 0,
+                                   const QString & stackLocation32 = "esp",
+                                   duint stackOffset32 = 0,
+                                   duint callOffset32 = sizeof(duint),
+                                   const QString & stackLocation64 = "rsp",
+                                   duint stackOffset64 = 0x20,
+                                   duint callOffset64 = sizeof(duint))
             : name(name),
               stackArgCount(stackArgCount),
               stackLocation32(stackLocation32),
+              stackOffset32(stackOffset32),
               callOffset32(callOffset32),
               stackLocation64(stackLocation64),
+              stackOffset64(stackOffset64),
               callOffset64(callOffset64)
         {
         }
     };
 
-    Ui::CPUArgumentWidget* ui;
-    StdTable* mTable;
-    int mCurrentCallingConvention;
-    duint mStackOffset;
-    bool mAllowUpdate;
+    Architecture* mArchitecture = nullptr;
+    Ui::CPUArgumentWidget* ui = nullptr;
+    StdTable* mTable = nullptr;
+    int mCurrentCallingConvention = -1;
+    duint mStackOffset = 0;
+    bool mAllowUpdate = true;
     std::vector<CallingConvention> mCallingConventions;
     std::vector<duint> mArgumentValues;
     QAction* mFollowDisasm;
@@ -131,9 +149,10 @@ private:
     QAction* mFollowAddrDump;
     QAction* mFollowStack;
     QAction* mFollowAddrStack;
+    QAction* mCopyClipboard;
 
     void loadConfig();
     void setupTable();
-};
 
-#endif // CPUARGUMENTWIDGET_H
+    void updateStackOffset(bool iscall);
+};

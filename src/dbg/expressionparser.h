@@ -2,12 +2,44 @@
 #define _EXPRESSION_PARSER_H
 
 #include "_global.h"
+#include "value.h"
 
 class ExpressionParser
 {
 public:
+    struct EvalValue
+    {
+        bool evaluated = false;
+        bool isString = false;
+        duint value = 0;
+        String data;
+
+        explicit EvalValue(duint value)
+            : evaluated(true), value(value) {}
+
+        EvalValue(const String & data, bool isString)
+            : evaluated(false), data(data), isString(isString) {}
+
+        bool DoEvaluate(duint & result, bool silent = true, bool baseonly = false, int* value_size = nullptr, bool* isvar = nullptr, bool* hexonly = nullptr) const
+        {
+            if(evaluated)
+            {
+                if(value_size)
+                    *value_size = sizeof(duint);
+                if(isvar)
+                    *isvar = false;
+                if(hexonly)
+                    *hexonly = false;
+                result = value;
+                return true;
+            }
+            return valfromstring_noexpr(data.c_str(), &result, silent, baseonly, value_size, isvar, hexonly);
+        }
+    };
+
     explicit ExpressionParser(const String & expression);
-    bool Calculate(duint & value, bool signedcalc, bool silent = true, bool baseonly = false, int* value_size = nullptr, bool* isvar = nullptr, bool* hexonly = nullptr) const;
+    bool Calculate(duint & value, bool signedcalc, bool allowassign, bool silent = true, bool baseonly = false, int* value_size = nullptr, bool* isvar = nullptr, bool* hexonly = nullptr) const;
+    bool Calculate(EvalValue & value, bool signedcalc, bool allowassign, bool silent = true, bool baseonly = false, int* value_size = nullptr, bool* isvar = nullptr, bool* hexonly = nullptr) const;
 
     const String & GetExpression() const
     {
@@ -24,10 +56,17 @@ public:
     public:
         enum class Type
         {
+            Error,
             Data,
-            OpenBracket,
-            CloseBracket,
+            QuotedData,
+            NumericLiteral,
+            Function,
+            Comma,
+            OpenParen,
+            CloseParen,
+
             OperatorUnarySub,
+            OperatorUnaryAdd,
             OperatorNot,
             OperatorMul,
             OperatorHiMul,
@@ -37,6 +76,8 @@ public:
             OperatorSub,
             OperatorShl,
             OperatorShr,
+            OperatorRol,
+            OperatorRor,
             OperatorAnd,
             OperatorXor,
             OperatorOr,
@@ -49,7 +90,25 @@ public:
             OperatorLogicalAnd,
             OperatorLogicalOr,
             OperatorLogicalNot,
-            Error
+            OperatorLogicalImpl,
+            OperatorAssign,
+            OperatorAssignMul,
+            OperatorAssignHiMul,
+            OperatorAssignDiv,
+            OperatorAssignMod,
+            OperatorAssignAdd,
+            OperatorAssignSub,
+            OperatorAssignShl,
+            OperatorAssignShr,
+            OperatorAssignRol,
+            OperatorAssignRor,
+            OperatorAssignAnd,
+            OperatorAssignXor,
+            OperatorAssignOr,
+            OperatorSuffixInc,
+            OperatorSuffixDec,
+            OperatorPrefixInc,
+            OperatorPrefixDec
         };
 
         enum class Associativity
@@ -59,9 +118,41 @@ public:
             Unspecified
         };
 
-        Token(const String & data, const Type type);
-        const String & data() const;
-        Type type() const;
+        Token(const String & data, Type type)
+            : mData(data),
+              mType(type)
+        {
+        }
+
+        const String & data() const
+        {
+            return mData;
+        }
+
+        Type type() const
+        {
+            return mType;
+        }
+
+        duint info() const
+        {
+            return mInfo;
+        }
+
+        void setInfo(duint info)
+        {
+            mInfo = info;
+        }
+
+        Token & tryConvertToNumericLiteral()
+        {
+            if(type() == Type::Data && valfromstring_noexpr_isvar(data().c_str()) != 0 && valfromstring_noexpr(mData.c_str(), &mInfo, true, true))
+            {
+                mType = Type::NumericLiteral;
+            }
+            return *this;
+        }
+
         Associativity associativity() const;
         int precedence() const;
         bool isOperator() const;
@@ -69,22 +160,41 @@ public:
     private:
         String mData;
         Type mType;
+        duint mInfo = 0;
     };
 
 private:
     static String fixClosingBrackets(const String & expression);
+    Token::Type resolveQuotedData() const;
     bool isUnaryOperator() const;
     void tokenize();
     void shuntingYard();
-    void addOperatorToken(const char ch, const Token::Type type);
-    bool unsignedOperation(const Token::Type type, const duint op1, const duint op2, duint & result) const;
-    bool signedOperation(const Token::Type type, const dsint op1, const dsint op2, duint & result) const;
+    void addOperatorToken(const String & data, Token::Type type);
+    bool unsignedOperation(Token::Type type, const EvalValue & op1, const EvalValue & op2, EvalValue & result, bool silent, bool baseonly, bool allowassign) const;
+    bool signedOperation(Token::Type type, const EvalValue & op1, const EvalValue & op2, EvalValue & result, bool silent, bool baseonly, bool allowassign) const;
+
+    void addOperatorToken(char ch, Token::Type type)
+    {
+        String data;
+        data.push_back(ch);
+        addOperatorToken(data, type);
+    }
+
+    bool tryEatNextCh(size_t & i, char ch) const
+    {
+        if(!(i + 1 < mExpression.length() && mExpression[i + 1] == ch))
+            return false;
+        i++;
+        return true;
+    }
 
     String mExpression;
     bool mIsValidExpression;
+    bool mIsConstValue;
     std::vector<Token> mTokens;
     std::vector<Token> mPrefixTokens;
     String mCurToken;
+    std::vector<bool> mCurTokenQuoted;
 };
 
 #endif //_EXPRESSION_PARSER_H

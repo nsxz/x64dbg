@@ -29,7 +29,7 @@ SCRIPT_EXPORT bool Script::Argument::GetInfo(duint addr, ArgumentInfo* info)
         return false;
     if(info)
     {
-        strcpy_s(info->mod, argument.mod);
+        strcpy_s(info->mod, argument.mod().c_str());
         info->rvaStart = argument.start;
         info->rvaEnd = argument.end;
         info->manual = argument.manual;
@@ -55,7 +55,7 @@ SCRIPT_EXPORT void Script::Argument::DeleteRange(duint start, duint end, bool de
 
 SCRIPT_EXPORT void Script::Argument::Clear()
 {
-    ArgumentClear();
+    ArgumentClear(false);
 }
 
 SCRIPT_EXPORT bool Script::Argument::GetList(ListOf(ArgumentInfo) list)
@@ -67,7 +67,7 @@ SCRIPT_EXPORT bool Script::Argument::GetList(ListOf(ArgumentInfo) list)
     for(const auto & argument : argumentList)
     {
         ArgumentInfo scriptArgument;
-        strcpy_s(scriptArgument.mod, argument.mod);
+        strcpy_s(scriptArgument.mod, argument.mod().c_str());
         scriptArgument.rvaStart = argument.start;
         scriptArgument.rvaEnd = argument.end;
         scriptArgument.manual = argument.manual;

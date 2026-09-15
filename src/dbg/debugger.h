@@ -2,50 +2,61 @@
 #define _DEBUGGER_H
 
 #include "_global.h"
-#include "TitanEngine\TitanEngine.h"
+#include "TitanEngine/TitanEngine.h"
 #include "command.h"
 #include "breakpoint.h"
-#include "undocumented.h"
-#include "value.h"
 #include "_plugins.h"
+#include "commandline.h"
+#include <tlhelp32.h>
+#include <psapi.h>
+
+enum LibraryBreakpointType
+{
+    UE_ON_LIB_LOAD = 1,
+    UE_ON_LIB_UNLOAD = 2,
+    UE_ON_LIB_ALL = 3,
+};
+
+//enums
+enum class ExceptionBreakOn
+{
+    FirstChance,
+    SecondChance,
+    DoNotBreak
+};
+
+enum class ExceptionHandledBy
+{
+    Debugger,
+    Debuggee
+};
 
 //structures
 struct INIT_STRUCT
 {
-    char* exe;
-    char* commandline;
-    char* currentfolder;
+    HANDLE event = nullptr;
+    std::string exe;
+    std::string commandline;
+    std::string currentfolder;
+    uint32_t entryPointRva = 0;
+    DWORD pid = 0;
+    bool attach = false;
+    bool pauseAtAttach = false;
+    bool isDll = false;
 };
-
-typedef enum
-{
-    CMDL_ERR_READ_PEBBASE = 0,
-    CMDL_ERR_READ_PROCPARM_PTR,
-    CMDL_ERR_READ_PROCPARM_CMDLINE,
-    CMDL_ERR_CONVERTUNICODE,
-    CMDL_ERR_ALLOC,
-    CMDL_ERR_GET_PEB,
-    CMDL_ERR_READ_GETCOMMANDLINEBASE,
-    CMDL_ERR_CHECK_GETCOMMANDLINESTORED,
-    CMDL_ERR_WRITE_GETCOMMANDLINESTORED,
-    CMDL_ERR_GET_GETCOMMANDLINE,
-    CMDL_ERR_ALLOC_UNICODEANSI_COMMANDLINE,
-    CMDL_ERR_WRITE_ANSI_COMMANDLINE,
-    CMDL_ERR_WRITE_UNICODE_COMMANDLINE,
-    CMDL_ERR_WRITE_PEBUNICODE_COMMANDLINE
-
-} cmdline_error_type_t;
-
-typedef struct
-{
-    cmdline_error_type_t type;
-    duint addr;
-} cmdline_error_t;
 
 struct ExceptionRange
 {
     unsigned int start;
     unsigned int end;
+};
+
+struct ExceptionFilter
+{
+    ExceptionRange range;
+    ExceptionBreakOn breakOn;
+    bool logException;
+    ExceptionHandledBy handledBy;
 };
 
 #pragma pack(push,8)
@@ -64,57 +75,113 @@ void dbgstop();
 duint dbgdebuggedbase();
 duint dbggettimewastedcounter();
 bool dbgisrunning();
+bool dbgisdebugging();
 bool dbgisdll();
 void dbgsetattachevent(HANDLE handle);
+DWORD dbggetattachmainthread();
+void dbgclearattachmainthread();
+duint dbggetdbgeventcount();
+bool dbgspawnbreakinthread();
+void dbgsetresumetid(duint tid);
 void DebugUpdateGui(duint disasm_addr, bool stack);
+void DebugUpdateGuiAsync(duint disasm_addr, bool stack);
+void DebugUpdateTitleAsync(duint disasm_addr, bool analyzeThreadSwitch);
+void DebugUpdateGuiSetStateAsync(duint disasm_addr, DBGSTATE state);
+void DebugUpdateBreakpointsViewAsync();
 void DebugUpdateStack(duint dumpAddr, duint csp, bool forceDump = false);
+void DebugRemoveBreakpoints();
+void DebugSetBreakpoints();
+void GuiSetDebugStateAsync(DBGSTATE state);
 void dbgsetskipexceptions(bool skip);
-void dbgsetstepping(bool stepping);
-void dbgsetispausedbyuser(bool b);
-void dbgsetisdetachedbyuser(bool b);
+void dbgsetsteprepeat(bool steppingIn, duint repeat);
 void dbgsetfreezestack(bool freeze);
-void dbgclearignoredexceptions();
-void dbgaddignoredexception(ExceptionRange range);
-bool dbgisignoredexception(unsigned int exception);
+void dbgclearexceptionfilters();
+void dbgaddexceptionfilter(ExceptionFilter filter);
+const ExceptionFilter & dbggetexceptionfilter(unsigned int exception);
 bool dbgcmdnew(const char* name, CBCOMMAND cbCommand, bool debugonly);
 bool dbgcmddel(const char* name);
-bool dbglistprocesses(std::vector<PROCESSENTRY32>* list);
+bool dbglistprocesses(std::vector<PROCESSENTRY32>* infoList, std::vector<std::string>* commandList, std::vector<std::string>* winTextList);
 bool dbgsetcmdline(const char* cmd_line, cmdline_error_t* cmd_line_error);
-bool dbggetcmdline(char** cmd_line, cmdline_error_t* cmd_line_error);
+bool dbggetcmdline(char** cmd_line, cmdline_error_t* cmd_line_error, HANDLE hProcess);
+cmdline_qoutes_placement_t getqoutesplacement(const char* cmdline);
 void dbgstartscriptthread(CBPLUGINSCRIPT cbScript);
-duint dbggetdebuggedbase();
+duint dbggetdbgevents();
+bool dbgsettracecondition(const String & expression, duint maxCount);
+bool dbgsettracelog(const String & expression, const String & text);
+bool dbgsettracecmd(const String & expression, const String & text);
+bool dbgtraceactive();
+void dbgforcebreaktrace();
+bool dbgstepactive();
+void dbgforcebreakstep();
+bool dbgsettracelogfile(const char* fileName);
+void dbgsettracepartyfilter(int party);
+int dbggettracepartyfilter();
+void dbgsetdebuggeeinitscript(const char* fileName);
+const char* dbggetdebuggeeinitscript();
+void dbgsetforeground();
+bool dbggetwintext(std::vector<std::string>* winTextList, const DWORD dwProcessId);
+void dbgtracebrowserneedsupdate();
+bool dbgsetdllbreakpoint(const char* mod, DWORD type, bool singleshoot);
+bool dbgdeletedllbreakpoint(const char* mod, DWORD type);
+void dbgsetdebugflags(DWORD flags);
+void dbgcreatedebugthread(INIT_STRUCT* init);
+String formatpidtid(DWORD pidtid);
+void dbgsetcontinuestatus(DWORD status);
+DWORD dbggetcontinuestatus();
 
 void cbStep();
 void cbRtrStep();
 void cbPauseBreakpoint();
-void cbSystemBreakpoint(void* ExceptionData);
-void cbMemoryBreakpoint(void* ExceptionAddress);
-void cbHardwareBreakpoint(void* ExceptionAddress);
+void cbMemoryBreakpoint(const void* ExceptionAddress);
+void cbHardwareBreakpoint(const void* ExceptionAddress);
 void cbUserBreakpoint();
 void cbDebugLoadLibBPX();
-void cbLibrarianBreakpoint(void* lpData);
-DWORD WINAPI threadDebugLoop(void* lpParameter);
-bool cbDeleteAllBreakpoints(const BREAKPOINT* bp);
-bool cbEnableAllBreakpoints(const BREAKPOINT* bp);
-bool cbDisableAllBreakpoints(const BREAKPOINT* bp);
-bool cbEnableAllHardwareBreakpoints(const BREAKPOINT* bp);
-bool cbDisableAllHardwareBreakpoints(const BREAKPOINT* bp);
-bool cbEnableAllMemoryBreakpoints(const BREAKPOINT* bp);
-bool cbDisableAllMemoryBreakpoints(const BREAKPOINT* bp);
-bool cbBreakpointList(const BREAKPOINT* bp);
-bool cbDeleteAllMemoryBreakpoints(const BREAKPOINT* bp);
-bool cbDeleteAllHardwareBreakpoints(const BREAKPOINT* bp);
-DWORD WINAPI threadAttachLoop(void* lpParameter);
-void cbDetach();
+void cbTraceOverConditionalStep();
+void cbTraceIntoConditionalStep();
+void cbTraceIntoBeyondTraceRecordStep();
+void cbTraceOverBeyondTraceRecordStep();
+void cbTraceIntoIntoTraceRecordStep();
+void cbTraceOverIntoTraceRecordStep();
+typedef void(*STEPFUNCTION)(TITANCBSTEP);
+void cbTraceXConditionalStep(STEPFUNCTION stepFunction, TITANCBSTEP callback);
+void cbRunToUserCodeBreakpoint(const void* ExceptionAddress);
 bool cbSetModuleBreakpoints(const BREAKPOINT* bp);
+EXCEPTION_DEBUG_INFO & getLastExceptionInfo();
+bool dbgrestartadmin();
+void StepIntoWow64(TITANCBSTEP callback);
+void StepOverWrapper(TITANCBSTEP callback);
+void StepIntoUser(TITANCBSTEP callback);
+void StepIntoSystem(TITANCBSTEP callback);
+void StepOverUser(TITANCBSTEP callback);
+void StepOverSystem(TITANCBSTEP callback);
+bool dbgisdepenabled();
+BOOL CALLBACK chkWindowPidCallback(HWND hWnd, LPARAM lParam);
+BOOL ismainwindow(HWND handle);
 
 //variables
 extern PROCESS_INFORMATION* fdProcessInfo;
 extern HANDLE hActiveThread;
 extern HANDLE hProcessToken;
-extern char szFileName[MAX_PATH];
+extern char szProgramDir[MAX_PATH];
+extern char szUserDir[MAX_PATH];
+extern char szDebuggeePath[MAX_PATH];
+extern char szDllLoaderPath[MAX_PATH];
 extern char szSymbolCachePath[MAX_PATH];
 extern bool bUndecorateSymbolNames;
 extern bool bEnableSourceDebugging;
+extern bool bSkipInt3Stepping;
+extern bool bIgnoreInconsistentBreakpoints;
+extern bool bNoForegroundWindow;
+extern bool bVerboseExceptionLogging;
+extern bool bNoWow64SingleStepWorkaround;
+extern bool bForceLoadSymbols;
+extern bool bNewStringAlgorithm;
+extern bool bWindowLongPath;
+extern duint maxSkipExceptionCount;
+extern HANDLE mProcHandle;
+extern HANDLE mForegroundHandle;
+extern duint gRtrPreviousCSP;
+extern HANDLE hDebugLoopThread;
+extern std::atomic_bool bIsDebugging;
 
 #endif // _DEBUGGER_H

@@ -1,74 +1,124 @@
 #include "SourceView.h"
-#include <QFile>
-#include <QTextStream>
-#include <QMessageBox>
-#include "Configuration.h"
+#include <QFileDialog>
+#include <QDesktopServices>
+#include <QProcess>
+#include <QInputDialog>
+#include <memory>
+#include "FileLines.h"
+#include "Bridge.h"
+#include "CommonActions.h"
 
-SourceView::SourceView(QString path, int line, StdTable* parent) : StdTable(parent)
+SourceView::SourceView(QString path, duint addr, QWidget* parent)
+    : AbstractStdTable(parent),
+      mSourcePath(path),
+      mModBase(DbgFunctions()->ModBaseFromAddr(addr))
 {
-    mSourcePath = path;
+    enableMultiSelection(true);
+    enableColumnSorting(false);
+    setDrawDebugOnly(false);
+    setAddressColumn(0);
 
-    addColumnAt(8 + 4 * getCharWidth(), "Line", true);
-    addColumnAt(0, "Code", true);
+    int charwidth = getCharWidth();
 
-    loadFile();
-    setInstructionPointer(line);
+    addColumnAt(8 + charwidth * sizeof(duint) * 2, tr("Address"), false);
+    addColumnAt(8 + charwidth * 8, tr("Line"), false);
+    addColumnAt(0, tr("Code"), false);
+    loadColumnFromConfig("SourceView");
+    setupContextMenu();
 
     connect(this, SIGNAL(contextMenuSignal(QPoint)), this, SLOT(contextMenuSlot(QPoint)));
-    setupContextMenu();
+    connect(this, SIGNAL(doubleClickedSignal()), mCommonActions, SLOT(followDisassemblySlot()));
+    connect(this, SIGNAL(enterPressedSignal()), mCommonActions, SLOT(followDisassemblySlot()));
+    connect(Bridge::getBridge(), SIGNAL(updateDisassembly()), this, SLOT(reloadData()));
+
+    Initialize();
+
+    loadFile();
 }
 
-void SourceView::contextMenuSlot(const QPoint & pos)
+SourceView::~SourceView()
 {
-    QMenu wMenu(this);
-
-    int line = getInitialSelection() + 1;
-    dsint addr = DbgFunctions()->GetAddrFromLine(mSourcePath.toUtf8().constData(), line);
-    if(addr)
-        wMenu.addAction(mFollowInDisasm);
-
-    wMenu.exec(mapToGlobal(pos));
+    clear();
 }
 
-void SourceView::setupContextMenu()
+QString SourceView::getCellContent(duint row, duint column)
 {
-    mFollowInDisasm = new QAction("Follow in &Disassembler", this);
-    connect(mFollowInDisasm, SIGNAL(triggered()), this, SLOT(followInDisasmSlot()));
-}
-
-void SourceView::setSelection(int line)
-{
-    int offset = line - 1;
-    if(isValidIndex(offset, 0))
+    if(!isValidIndex(row, column))
+        return QString();
+    LineData & line = mLines.at(row - mPrepareTableOffset);
+    switch(column)
     {
-        int rangefrom = getTableOffset();
-        int rangeto = rangefrom + getViewableRowsCount() - 1;
-        if(offset < rangefrom) //ip lays before the current view
-            setTableOffset(offset);
-        else if(offset > (rangeto - 1)) //ip lays after the current view
-            setTableOffset(offset - getViewableRowsCount() + 2);
-        setSingleSelection(offset);
+    case ColAddr:
+        return line.addr ? ToPtrString(line.addr) : QString();
+    case ColLine:
+        return QString("%1").arg(line.index + 1);
+    case ColCode:
+        return line.code.code;
     }
-    reloadData(); //repaint
+    __debugbreak();
+    return "INVALID";
 }
 
-void SourceView::setInstructionPointer(int line)
+duint SourceView::getCellUserdata(duint row, duint column)
 {
-    int offset = line - 1;
-    if(!isValidIndex(offset, 0))
+    if(!isValidIndex(row, column))
+        return 0;
+    LineData & line = mLines.at(row - mPrepareTableOffset);
+    switch(column)
     {
-        mIpLine = 0;
+    case ColAddr:
+        return line.addr;
+    case ColLine:
+        return line.index + 1;
+    default:
+        return 0;
+    }
+}
+
+bool SourceView::isValidIndex(duint row, duint column)
+{
+    if(!mFileLines)
+        return false;
+    if(column < ColAddr || column > ColCode)
+        return false;
+    return row >= 0 && size_t(row) < mFileLines->size();
+}
+
+void SourceView::sortRows(duint column, bool ascending)
+{
+    Q_UNUSED(column);
+    Q_UNUSED(ascending);
+}
+
+void SourceView::prepareData()
+{
+    AbstractTableView::prepareData();
+    if(mFileLines)
+    {
+        auto lines = getNbrOfLineToPrint();
+        mPrepareTableOffset = getTableOffset();
+        mLines.clear();
+        mLines.resize(lines);
+        for(duint i = 0; i < lines; i++)
+            parseLine(mPrepareTableOffset + i, mLines[i]);
+    }
+}
+
+void SourceView::setSelection(duint addr)
+{
+    int line = 0;
+    if(!DbgFunctions()->GetSourceFromAddr(addr, nullptr, &line))
         return;
-    }
-    mIpLine = line;
-    int rangefrom = getTableOffset();
-    int rangeto = rangefrom + getViewableRowsCount() - 1;
-    if(offset < rangefrom) //ip lays before the current view
-        setTableOffset(offset);
-    else if(offset > (rangeto - 1)) //ip lays after the current view
-        setTableOffset(offset - getViewableRowsCount() + 2);
-    setSingleSelection(offset);
+    scrollSelect(line - 1);
     reloadData(); //repaint
+}
+
+void SourceView::clear()
+{
+    delete mFileLines;
+    mFileLines = nullptr;
+    mSourcePath.clear();
+    mModBase = 0;
 }
 
 QString SourceView::getSourcePath()
@@ -76,65 +126,112 @@ QString SourceView::getSourcePath()
     return mSourcePath;
 }
 
-void SourceView::loadFile()
+void SourceView::contextMenuSlot(const QPoint & pos)
 {
-    QFile file(mSourcePath);
-    if(!file.open(QIODevice::ReadOnly))
-    {
-        return; //error?
-    }
-    QTextStream in(&file);
-    int lineNum = 0;
-    while(!in.atEnd())
-    {
-        QString line = in.readLine().replace('\t', "    "); //replace tabs with four spaces
-        setRowCount(lineNum + 1);
-        setCellContent(lineNum, 0, QString().sprintf("%04d", lineNum + 1));
-        setCellContent(lineNum, 1, line);
-        lineNum++;
-    }
-    reloadData();
-    file.close();
+    QMenu menu(this);
+    mMenuBuilder->build(&menu);
+    menu.exec(mapToGlobal(pos));
 }
 
-QString SourceView::paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h)
+void SourceView::gotoLineSlot()
 {
-    painter->save();
-    bool wIsSelected = isSelected(rowBase, rowOffset);
-    // Highlight if selected
-    if(wIsSelected)
-        painter->fillRect(QRect(x, y, w, h), QBrush(selectionColor)); //ScriptViewSelectionColor
-    QString returnString;
-    int line = rowBase + rowOffset + 1;
-    switch(col)
+    bool ok = false;
+    int line = QInputDialog::getInt(this, tr("Go to line"), tr("Line (decimal):"), getInitialSelection() + 1, 1, getRowCount() - 1, 1, &ok, Qt::WindowTitleHint | Qt::WindowCloseButtonHint);
+    if(ok)
     {
-    case 0: //line number
+        scrollSelect(line - 1);
+        reloadData(); //repaint
+    }
+}
+
+void SourceView::openSourceFileSlot()
+{
+    QDesktopServices::openUrl(QUrl::fromLocalFile(mSourcePath));
+}
+
+void SourceView::showInDirectorySlot()
+{
+    QStringList args;
+    args << "/select," << QDir::toNativeSeparators(mSourcePath);
+    auto process = new QProcess(this);
+    process->start("explorer.exe", args);
+}
+
+void SourceView::setupContextMenu()
+{
+    mMenuBuilder = new MenuBuilder(this);
+    mCommonActions = new CommonActions(this, getActionHelperFuncs(), [this]()
     {
-        if(line == mIpLine) //IP
+        return addrFromIndex(getInitialSelection());
+    });
+    mCommonActions->build(mMenuBuilder, CommonActions::ActionDisasm | CommonActions::ActionDump | CommonActions::ActionBreakpoint | CommonActions::ActionLabel | CommonActions::ActionComment
+                          | CommonActions::ActionBookmark | CommonActions::ActionMemoryMap | CommonActions::ActionNewOrigin | CommonActions::ActionNewThread);
+    mMenuBuilder->addSeparator();
+    mMenuBuilder->addAction(makeShortcutAction(DIcon("geolocation-goto"), tr("Go to line"), SLOT(gotoLineSlot()), "ActionGotoExpression"));
+    mMenuBuilder->addAction(makeAction(DIcon("source"), tr("Open source file"), SLOT(openSourceFileSlot())));
+    mMenuBuilder->addAction(makeAction(DIcon("source_show_in_folder"), tr("Show source file in directory"), SLOT(showInDirectorySlot())));
+    mMenuBuilder->addSeparator();
+    MenuBuilder* copyMenu = new MenuBuilder(this);
+    setupCopyColumnMenu(copyMenu);
+    mMenuBuilder->addMenu(makeMenu(DIcon("copy"), tr("&Copy")), copyMenu);
+    mMenuBuilder->loadFromConfig();
+}
+
+void SourceView::parseLine(size_t index, LineData & line)
+{
+    QString lineText = QString::fromStdString((*mFileLines)[index]);
+    line.addr = addrFromIndex(index);
+    line.index = index;
+
+    line.code.code.clear();
+    for(int i = 0; i < lineText.length(); i++)
+    {
+        QChar ch = lineText[i];
+        if(ch == '\t')
         {
-            painter->fillRect(QRect(x, y, w, h), QBrush(ConfigColor("DisassemblyCipBackgroundColor")));
-            painter->setPen(QPen(ConfigColor("DisassemblyCipColor"))); //white address (ScriptViewIpTextColor)
+            int col = line.code.code.length();
+            int spaces = mTabSize - col % mTabSize;
+            line.code.code.append(QString(spaces, ' '));
         }
         else
-            painter->setPen(QPen(this->textColor));
-        painter->drawText(QRect(x + 4, y , w - 4 , h), Qt::AlignVCenter | Qt::AlignLeft, QString().sprintf("%04d", line));
+        {
+            line.code.code.append(ch);
+        }
     }
-    break;
-
-    case 1: //command
-    {
-        returnString = getCellContent(rowBase + rowOffset, col); //TODO: simple keyword/regex-based syntax highlighting
-    }
-    break;
-    }
-    painter->restore();
-    return returnString;
+    //TODO: add syntax highlighting?
 }
 
-void SourceView::followInDisasmSlot()
+duint SourceView::addrFromIndex(size_t index)
 {
-    int line = getInitialSelection() + 1;
-    dsint addr = DbgFunctions()->GetAddrFromLine(mSourcePath.toUtf8().constData(), line);
-    DbgCmdExecDirect(QString().sprintf("disasm %p", addr).toUtf8().constData());
-    emit showCpu();
+    return DbgFunctions()->GetAddrFromLineEx(mModBase, mSourcePath.toUtf8().constData(), int(index + 1));
+}
+
+void SourceView::loadFile()
+{
+    if(!mSourcePath.length())
+        return;
+    if(mFileLines)
+    {
+        delete mFileLines;
+        mFileLines = nullptr;
+    }
+    mFileLines = new FileLines();
+    mFileLines->open(mSourcePath.toStdWString().c_str());
+    if(!mFileLines->isopen())
+    {
+        SimpleWarningBox(this, tr("Error"), tr("Failed to open file!"));
+        delete mFileLines;
+        mFileLines = nullptr;
+        return;
+    }
+    if(!mFileLines->parse())
+    {
+        SimpleWarningBox(this, tr("Error"), tr("Failed to parse file!"));
+        delete mFileLines;
+        mFileLines = nullptr;
+        return;
+    }
+    setRowCount(mFileLines->size());
+    setTableOffset(0);
+    reloadData();
 }

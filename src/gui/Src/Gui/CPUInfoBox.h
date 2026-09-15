@@ -1,42 +1,57 @@
-#ifndef INFOBOX_H
-#define INFOBOX_H
+#pragma once
 
 #include "StdTable.h"
-#include <QAction>
+#include "Architecture.h"
+
+class WordEditDialog;
+class XrefBrowseDialog;
+class QZydis;
 
 class CPUInfoBox : public StdTable
 {
     Q_OBJECT
 public:
-    explicit CPUInfoBox(StdTable* parent = 0);
+    CPUInfoBox(Architecture* architecture, QWidget* parent = nullptr);
+    ~CPUInfoBox();
     int getHeight();
-    void addFollowMenuItem(QMenu* menu, QString name, dsint value);
-    void setupFollowMenu(QMenu* menu, dsint wVA);
-    int followInDump(dsint wVA);
+    void addFollowMenuItem(QMenu* menu, QString name, duint value);
+    void setupFollowMenu(QMenu* menu, duint va);
+    void addModifyValueMenuItem(QMenu* menu, QString name, duint value);
+    void setupModifyValueMenu(QMenu* menu, duint va);
+    void addWatchMenuItem(QMenu* menu, QString name, duint value);
+    void setupWatchMenu(QMenu* menu, duint va);
+    int followInDump(duint va);
+
+    static QString formatSSEOperand(const QByteArray & data, unsigned char vectorType);
 
 public slots:
-    void disasmSelectionChanged(dsint parVA);
+    void disasmSelectionChanged(duint parVA);
     void dbgStateChanged(DBGSTATE state);
     void contextMenuSlot(QPoint pos);
     void followActionSlot();
+    void modifySlot();
+    void findXReferencesSlot();
     void copyAddress();
     void copyRva();
     void copyOffset();
     void doubleClickedSlot();
+    void addInfoLine(const QString & infoLine);
 
 private:
-    dsint curAddr;
-    dsint curRva;
-    dsint curOffset;
-    QString getSymbolicName(dsint addr);
+    Architecture* mArchitecture = nullptr;
+    duint mCurAddr = 0;
+    duint mCurRva = 0;
+    duint mCurOffset = 0;
     void setInfoLine(int line, QString text);
     QString getInfoLine(int line);
     void clear();
     void setupContextMenu();
+    void setupShortcuts();
+    XrefBrowseDialog* mXrefDlg = nullptr;
+    QZydis* mDisasm;
 
     QAction* mCopyAddressAction;
     QAction* mCopyRvaAction;
     QAction* mCopyOffsetAction;
+    QAction* mCopyLineAction;
 };
-
-#endif // INFOBOX_H

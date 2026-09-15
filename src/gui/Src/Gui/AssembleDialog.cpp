@@ -1,8 +1,11 @@
 #include "AssembleDialog.h"
 #include "ui_AssembleDialog.h"
+#include "ValidateExpressionThread.h"
 #include <QMessageBox>
+#include "Configuration.h"
 
 bool AssembleDialog::bWarningShowedOnce = false;
+#define ASSEMBLE_ERROR (-1337)
 
 AssembleDialog::AssembleDialog(QWidget* parent) :
     QDialog(parent),
@@ -10,7 +13,6 @@ AssembleDialog::AssembleDialog(QWidget* parent) :
 {
     ui->setupUi(this);
     setModal(true);
-    setFixedSize(size()); //fixed size
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
 
     mSelectedInstrVa = 0;
@@ -21,16 +23,25 @@ AssembleDialog::AssembleDialog(QWidget* parent) :
     mValidateThread = new ValidateExpressionThread(this);
     mValidateThread->setOnExpressionChangedCallback(std::bind(&AssembleDialog::validateInstruction, this, std::placeholders::_1));
 
-    connect(ui->lineEdit, SIGNAL(textEdited(QString)), this, SLOT(textChangedSlot(QString)));
+    connect(ui->lineEdit, SIGNAL(textChanged(QString)), this, SLOT(textChangedSlot(QString)));
     connect(mValidateThread, SIGNAL(instructionChanged(dsint, QString)), this, SLOT(instructionChangedSlot(dsint, QString)));
+    mValidateThread->start();
 
     duint setting;
-    if(BridgeSettingGetUint("Engine", "Assembler", &setting) && setting == 1)
-        ui->radioKeystone->setChecked(true);
+    if(BridgeSettingGetUint("Engine", "Assembler", &setting))
+    {
+        if(setting == 1 || setting == 2)
+            ui->radioAsmjit->setChecked(true);
+    }
+
+    Config()->loadWindowGeometry(this);
 }
 
 AssembleDialog::~AssembleDialog()
 {
+    mValidateThread->stop();
+    mValidateThread->wait();
+    Config()->saveWindowGeometry(this);
     delete ui;
 }
 
@@ -38,7 +49,6 @@ void AssembleDialog::setTextEditValue(const QString & text)
 {
     ui->lineEdit->setText(text);
     ui->lineEdit->selectAll();
-    validateInstruction(text);
 }
 
 void AssembleDialog::setKeepSizeChecked(bool checked)
@@ -63,7 +73,6 @@ void AssembleDialog::setSelectedInstrVa(const duint va)
     mSelectedInstrVa = va;
 }
 
-
 void AssembleDialog::setOkButtonEnabled(bool enabled)
 {
     ui->pushButtonOk->setEnabled(enabled);
@@ -71,12 +80,21 @@ void AssembleDialog::setOkButtonEnabled(bool enabled)
 
 void AssembleDialog::validateInstruction(QString expression)
 {
+    //sanitize the expression (just simplifying it by removing excess whitespaces)
+    expression = expression.simplified();
+
+    if(!expression.length())
+    {
+        emit mValidateThread->emitInstructionChanged(ASSEMBLE_ERROR, tr("empty instruction"));
+        return;
+    }
     //void instructionChanged(bool validInstruction, dsint sizeDifference, QString error)
     dsint sizeDifference = 0;
     int typedInstructionSize = 0;
     int selectedInstructionSize = 0;
     bool validInstruction = false;
     QByteArray error(MAX_ERROR_SIZE, 0);
+    QByteArray opcode(16, 0);
     BASIC_INSTRUCTION_INFO basicInstrInfo;
 
     // Get selected instruction info (size here)
@@ -84,9 +102,9 @@ void AssembleDialog::validateInstruction(QString expression)
     selectedInstructionSize = basicInstrInfo.size;
 
     // Get typed in instruction size
-    if(!DbgFunctions()->Assemble(mSelectedInstrVa, NULL, &typedInstructionSize, editText.toUtf8().constData(), error.data())  || selectedInstructionSize == 0)
+    if(!DbgFunctions()->Assemble(mSelectedInstrVa, (unsigned char*)opcode.data(), &typedInstructionSize, expression.toUtf8().constData(), error.data())  || selectedInstructionSize == 0)
     {
-        emit mValidateThread->emitInstructionChanged(0, QString(error));
+        emit mValidateThread->emitInstructionChanged(ASSEMBLE_ERROR, QString(error));
         return;
     }
 
@@ -95,28 +113,21 @@ void AssembleDialog::validateInstruction(QString expression)
 
     sizeDifference = typedInstructionSize - selectedInstructionSize;
 
-    emit mValidateThread->emitInstructionChanged(sizeDifference, "");
-}
-
-void AssembleDialog::hideEvent(QHideEvent* event)
-{
-    Q_UNUSED(event);
-    mValidateThread->stop();
-    mValidateThread->wait();
+    opcode.resize(typedInstructionSize);
+    emit mValidateThread->emitInstructionChanged(sizeDifference, opcode.toHex().toUpper());
 }
 
 void AssembleDialog::textChangedSlot(QString text)
 {
-    if(ui->checkBoxKeepSize->isChecked())
-        mValidateThread->textChanged(text);
+    mValidateThread->textChanged(text);
 }
 
-void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString error)
+void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString data)
 {
     // If there was an error
-    if(error.length())
+    if(sizeDifference == ASSEMBLE_ERROR)
     {
-        setKeepSizeLabel(tr("<font color='orange'><b>Instruction encoding error : %1</b></font>").arg(error));
+        setKeepSizeLabel(tr("<font color='orange'><b>Instruction encoding error: %1</b></font>").arg(data));
         setOkButtonEnabled(false);
     }
     else if(ui->checkBoxKeepSize->isChecked())
@@ -126,7 +137,7 @@ void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString error)
         {
             QString message = tr("<font color='red'><b>Instruction bigger by %1 %2...</b></font>")
                               .arg(sizeDifference)
-                              .arg(sizeDifference == 1 ? tr("byte") : tr("bytes"));
+                              .arg(sizeDifference == 1 ? tr("byte") : tr("bytes")).append(tr("<br>Bytes: %1").arg(data));
 
             setKeepSizeLabel(message);
             setOkButtonEnabled(false);
@@ -136,7 +147,7 @@ void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString error)
         {
             QString message = tr("<font color='#00cc00'><b>Instruction smaller by %1 %2...</b></font>")
                               .arg(-sizeDifference)
-                              .arg(sizeDifference == -1 ? tr("byte") : tr("bytes"));
+                              .arg(sizeDifference == -1 ? tr("byte") : tr("bytes")).append(tr("<br>Bytes: %1").arg(data));
 
             setKeepSizeLabel(message);
             setOkButtonEnabled(true);
@@ -144,7 +155,7 @@ void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString error)
         // SizeDifference == 0 <=> Both instruction have same size
         else
         {
-            QString message = tr("<font color='#00cc00'><b>Instruction is same size!</b></font>");
+            QString message = tr("<font color='#00cc00'><b>Instruction is same size!</b></font>").append(tr("<br>Bytes: %1").arg(data));
 
             setKeepSizeLabel(message);
             setOkButtonEnabled(true);
@@ -152,7 +163,7 @@ void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString error)
     }
     else
     {
-        QString message = tr("<font color='#00cc00'><b>Instruction encoded successfully!</b></font>");
+        QString message = tr("<font color='#00cc00'><b>Instruction encoded successfully!</b></font>").append(tr("<br>Bytes: %1").arg(data));
 
         setKeepSizeLabel(message);
         setOkButtonEnabled(true);
@@ -162,26 +173,12 @@ void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString error)
 void AssembleDialog::on_lineEdit_textChanged(const QString & arg1)
 {
     editText = arg1;
-
-    if(ui->checkBoxKeepSize->isChecked() && editText.size())
-        mValidateThread->start(editText);
 }
 
 void AssembleDialog::on_checkBoxKeepSize_clicked(bool checked)
 {
-    if(checked && editText.size())
-    {
-        mValidateThread->start();
-        mValidateThread->textChanged(ui->lineEdit->text()); // Have to add this or textChanged isn't called inside start()
-    }
-    else
-    {
-        mValidateThread->stop();
-        mValidateThread->wait();
-        ui->labelKeepSize->setText("");
-        ui->pushButtonOk->setEnabled(true);
-    }
     bKeepSizeChecked = checked;
+    mValidateThread->additionalStateChanged();
 }
 
 void AssembleDialog::on_checkBoxFillWithNops_clicked(bool checked)
@@ -196,9 +193,9 @@ void AssembleDialog::on_radioXEDParse_clicked()
     validateInstruction(ui->lineEdit->text());
 }
 
-void AssembleDialog::on_radioKeystone_clicked()
+void AssembleDialog::on_radioAsmjit_clicked()
 {
-    BridgeSettingSetUint("Engine", "Assembler", 1);
+    BridgeSettingSetUint("Engine", "Assembler", 2);
     DbgSettingsUpdated();
     validateInstruction(ui->lineEdit->text());
 }

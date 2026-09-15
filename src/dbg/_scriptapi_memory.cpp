@@ -1,5 +1,6 @@
 #include "_scriptapi_memory.h"
 #include "memory.h"
+#include "threading.h"
 
 SCRIPT_EXPORT bool Script::Memory::Read(duint addr, void* data, duint size, duint* sizeRead)
 {
@@ -26,9 +27,34 @@ SCRIPT_EXPORT bool Script::Memory::RemoteFree(duint addr)
     return MemFreeRemote(addr);
 }
 
+SCRIPT_EXPORT unsigned int Script::Memory::GetProtect(duint addr, bool reserved, bool cache)
+{
+    unsigned int prot = 0;
+    if(!MemGetProtect(addr, reserved, cache, &prot))
+        return 0;
+    return prot;
+}
+
+SCRIPT_EXPORT bool Script::Memory::SetProtect(duint addr, unsigned int protect, duint size)
+{
+    return MemSetProtect(addr, protect, size);
+}
+
+SCRIPT_EXPORT duint Script::Memory::GetBase(duint addr, bool reserved, bool cache)
+{
+    return MemFindBaseAddr(addr, nullptr, !cache, reserved);
+}
+
+SCRIPT_EXPORT duint Script::Memory::GetSize(duint addr, bool reserved, bool cache)
+{
+    duint size = 0;
+    MemFindBaseAddr(addr, &size, !cache, reserved);
+    return size;
+}
+
 SCRIPT_EXPORT unsigned char Script::Memory::ReadByte(duint addr)
 {
-    unsigned char data;
+    unsigned char data = 0;
     Read(addr, &data, sizeof(data), nullptr);
     return data;
 }
@@ -40,7 +66,7 @@ SCRIPT_EXPORT bool Script::Memory::WriteByte(duint addr, unsigned char data)
 
 SCRIPT_EXPORT unsigned short Script::Memory::ReadWord(duint addr)
 {
-    unsigned short data;
+    unsigned short data = 0;
     Read(addr, &data, sizeof(data), nullptr);
     return data;
 }
@@ -52,7 +78,7 @@ SCRIPT_EXPORT bool Script::Memory::WriteWord(duint addr, unsigned short data)
 
 SCRIPT_EXPORT unsigned int Script::Memory::ReadDword(duint addr)
 {
-    unsigned int data;
+    unsigned int data = 0;
     Read(addr, &data, sizeof(data), nullptr);
     return data;
 }
@@ -64,7 +90,7 @@ SCRIPT_EXPORT bool Script::Memory::WriteDword(duint addr, unsigned int data)
 
 SCRIPT_EXPORT unsigned long long Script::Memory::ReadQword(duint addr)
 {
-    unsigned long long data;
+    unsigned long long data = 0;
     Read(addr, &data, sizeof(data), nullptr);
     return data;
 }
@@ -76,7 +102,7 @@ SCRIPT_EXPORT bool Script::Memory::WriteQword(duint addr, unsigned long long dat
 
 SCRIPT_EXPORT duint Script::Memory::ReadPtr(duint addr)
 {
-    duint data;
+    duint data = 0;
     Read(addr, &data, sizeof(data), nullptr);
     return data;
 }

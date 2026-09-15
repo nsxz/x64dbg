@@ -1,104 +1,41 @@
-#ifndef STDTABLE_H
-#define STDTABLE_H
+#pragma once
 
-#include "AbstractTableView.h"
+#include "AbstractStdTable.h"
 
-class StdTable : public AbstractTableView
+class StdTable : public AbstractStdTable
 {
     Q_OBJECT
 public:
-    explicit StdTable(QWidget* parent = 0);
-    QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h);
-    void reloadData();
+    explicit StdTable(QWidget* parent = nullptr);
 
-    void mouseMoveEvent(QMouseEvent* event);
-    void mousePressEvent(QMouseEvent* event);
-    void mouseDoubleClickEvent(QMouseEvent* event);
-    void mouseReleaseEvent(QMouseEvent* event);
-    void keyPressEvent(QKeyEvent* event);
-
-    void enableMultiSelection(bool enabled);
-    void enableColumnSorting(bool enabled);
-
-    // Selection Management
-    void expandSelectionUpTo(int to);
-    void setSingleSelection(int index);
-    int getInitialSelection();
-    void selectNext();
-    void selectPrevious();
-    bool isSelected(int base, int offset);
-
-    // Data Management
-    void addColumnAt(int width, QString title, bool isClickable, QString copyTitle = "");
-    void setRowCount(int count);
-    void deleteAllColumns();
-    void setCellContent(int r, int c, QString s);
-    QString getCellContent(int r, int c);
-    bool isValidIndex(int r, int c);
-
-    //context menu helpers
-    void setupCopyMenu(QMenu* copyMenu);
-    void setCopyMenuOnly(bool bSet, bool bDebugOnly = true);
-
-signals:
-    void selectionChangedSignal(int index);
-    void keyPressedSignal(QKeyEvent* event);
-    void doubleClickedSignal();
-    void contextMenuSignal(const QPoint & pos);
-
-public slots:
-    void copyLineSlot();
-    void copyTableSlot();
-    void copyTableResizeSlot();
-    void copyEntrySlot();
-    void contextMenuRequestedSlot(const QPoint & pos);
-    void headerButtonPressedSlot(int col);
-
-private:
-    void copyTable(std::function<int(int)> getMaxColSize);
-
-    class ColumnCompare
+    // Sorting
+    struct SortBy
     {
-    public:
-        ColumnCompare(int col, bool greater)
-        {
-            mCol = col;
-            mGreater = greater;
-        }
-
-        inline bool operator()(const QList<QString> & a, const QList<QString> & b) const
-        {
-            bool less = QString::compare(a.at(mCol), b.at(mCol), Qt::CaseInsensitive) < 0;
-            if(mGreater)
-                return !less;
-            return less;
-        }
-    private:
-        int mCol;
-        int mGreater;
+        typedef std::function<bool(const QString &, const QString &)> t;
+        static bool AsText(const QString & a, const QString & b);
+        static bool AsInt(const QString & a, const QString & b);
+        static bool AsHex(const QString & a, const QString & b);
     };
 
-    enum GuiState_t {NoState, MultiRowsSelectionState};
+    // Data Management
+    void addColumnAt(int width, QString title, bool isClickable, QString copyTitle = "", SortBy::t sortFn = SortBy::AsText);
+    void deleteAllColumns() override;
+    void setRowCount(duint count) override;
+    void setCellContent(duint r, duint c, QString s);
+    void setCellContent(duint r, duint c, QString s, duint userdata);
+    QString getCellContent(duint r, duint c) override;
+    void setCellUserdata(duint r, duint c, duint userdata);
+    duint getCellUserdata(duint r, duint c) override;
+    bool isValidIndex(duint r, duint c) override;
+    void sortRows(duint column, bool ascending) override;
 
-    typedef struct _SelectionData_t
+protected:
+    struct CellData
     {
-        int firstSelectedIndex;
-        int fromIndex;
-        int toIndex;
-    } SelectionData_t;
+        QString text;
+        duint userdata = 0;
+    };
 
-    GuiState_t mGuiState;
-
-    SelectionData_t mSelection;
-
-    bool mIsMultiSelctionAllowed;
-    bool mCopyMenuOnly;
-    bool mCopyMenuDebugOnly;
-    bool mIsColumnSortingAllowed;
-
-    QList<QList<QString>> mData;
-    QList<QString> mCopyTitles;
-    QPair<int, bool> mSort;
+    std::vector<std::vector<CellData>> mData; //listof(row) where row = (listof(col) where col = CellData)
+    std::vector<SortBy::t> mColumnSortFunctions;
 };
-
-#endif // STDTABLE_H

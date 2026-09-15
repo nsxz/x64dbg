@@ -1,5 +1,6 @@
 #include "_scriptapi_flag.h"
 #include "value.h"
+#include "debugger.h"
 
 static const char* flagTable[] =
 {
@@ -16,8 +17,8 @@ static const char* flagTable[] =
 
 SCRIPT_EXPORT bool Script::Flag::Get(FlagEnum flag)
 {
-    duint value;
-    return valfromstring(flagTable[flag], &value) ? !!value : false;
+    auto eflags = GetContextDataEx(hActiveThread, UE_CFLAGS);
+    return valflagfromstring(eflags, flagTable[flag]);
 }
 
 SCRIPT_EXPORT bool Script::Flag::Set(FlagEnum flag, bool value)

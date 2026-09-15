@@ -1,8 +1,8 @@
-#ifndef TIMEWASTEDCOUNTER_H
-#define TIMEWASTEDCOUNTER_H
+#pragma once
 
 #include <QObject>
-#include <QLabel>
+
+class QLabel;
 
 class TimeWastedCounter : public QObject
 {
@@ -16,5 +16,3 @@ private slots:
 private:
     QLabel* mLabel;
 };
-
-#endif // TIMEWASTEDCOUNTER_H

@@ -1,8 +1,10 @@
-#ifndef EDITBREAKPOINTDIALOG_H
-#define EDITBREAKPOINTDIALOG_H
+#pragma once
 
 #include <QDialog>
 #include "Bridge.h"
+#include "Breakpoints.h"
+
+class QLineEdit;
 
 namespace Ui
 {
@@ -14,28 +16,24 @@ class EditBreakpointDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit EditBreakpointDialog(QWidget* parent, const BRIDGEBP & bp);
+    explicit EditBreakpointDialog(QWidget* parent, const Breakpoints::Data & bp);
     ~EditBreakpointDialog();
-    const BRIDGEBP & getBp()
+    const Breakpoints::Data & getBp()
     {
         return mBp;
     }
 
 private slots:
-    void on_editName_textEdited(const QString & arg1);
-    void on_editBreakCondition_textEdited(const QString & arg1);
     void on_editLogText_textEdited(const QString & arg1);
-    void on_editLogCondition_textEdited(const QString & arg1);
-    void on_editCommandText_textEdited(const QString & arg1);
-    void on_editCommandCondition_textEdited(const QString & arg1);
-    void on_checkBoxFastResume_toggled(bool checked);
-    void on_spinHitCount_valueChanged(int arg1);
+    void on_buttonLogFile_clicked();
+    void acceptedSlot();
+    void onExpressionChanged(const QString & text);
 
 private:
     Ui::EditBreakpointDialog* ui;
-    BRIDGEBP mBp;
+    Breakpoints::Data mBp;
+    QString mLogFile;
 
     void loadFromBp();
+    void updateExpressionStyle(QLineEdit* edit, const QString & text);
 };
-
-#endif // EDITBREAKPOINTDIALOG_H

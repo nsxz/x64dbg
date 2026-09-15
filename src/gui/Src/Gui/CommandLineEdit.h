@@ -1,7 +1,6 @@
-#ifndef COMMANDLINEEDIT_H
-#define COMMANDLINEEDIT_H
+#pragma once
 
-#include "Bridge/bridgemain.h"
+#include "bridge/bridgemain.h"
 #include "HistoryLineEdit.h"
 #include <QAbstractItemView>
 #include <QCompleter>
@@ -13,7 +12,9 @@ class CommandLineEdit : public HistoryLineEdit
     Q_OBJECT
 
 public:
-    explicit CommandLineEdit(QWidget* parent = 0);
+    explicit CommandLineEdit(QWidget* parent = nullptr);
+    ~CommandLineEdit();
+
     void keyPressEvent(QKeyEvent* event);
     bool focusNextPrevChild(bool next);
 
@@ -28,6 +29,8 @@ public slots:
     void registerScriptType(SCRIPTTYPEINFO* info);
     void unregisterScriptType(int id);
     void scriptTypeChanged(int index);
+    void scriptTypeActivated(int index);
+    void fontsUpdated();
 
 private:
     QComboBox* mCmdScriptType;
@@ -35,7 +38,6 @@ private:
     QStringListModel* mCompleterModel;
     QList<SCRIPTTYPEINFO> mScriptInfo;
     QStringList mDefaultCompletions;
+    bool mDefaultCompletionsUpdated = false;
     int mCurrentScriptIndex;
 };
-
-#endif // COMMANDLINEEDIT_H

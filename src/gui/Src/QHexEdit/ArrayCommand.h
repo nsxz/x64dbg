@@ -1,8 +1,9 @@
-#ifndef ARRAYCOMMAND_H
-#define ARRAYCOMMAND_H
+#pragma once
 
 #include <QUndoCommand>
-#include "XByteArray.h"
+#include <QByteArray>
+
+class XByteArray;
 
 class CharCommand : public QUndoCommand
 {
@@ -11,7 +12,7 @@ public:
     enum Cmd {insert, remove, replace};
 
     CharCommand(XByteArray* xData, Cmd cmd, int charPos, char newChar,
-                QUndoCommand* parent = 0);
+                QUndoCommand* parent = nullptr);
 
     void undo();
     void redo();
@@ -33,7 +34,7 @@ class ArrayCommand : public QUndoCommand
 {
 public:
     enum Cmd {insert, remove, replace};
-    ArrayCommand(XByteArray* xData, Cmd cmd, int baPos, QByteArray newBa = QByteArray(), int len = 0, QUndoCommand* parent = 0);
+    ArrayCommand(XByteArray* xData, Cmd cmd, int baPos, QByteArray newBa = QByteArray(), int len = 0, QUndoCommand* parent = nullptr);
     void undo();
     void redo();
 
@@ -46,5 +47,3 @@ private:
     QByteArray _newBa;
     QByteArray _oldBa;
 };
-
-#endif // ARRAYCOMMAND_H

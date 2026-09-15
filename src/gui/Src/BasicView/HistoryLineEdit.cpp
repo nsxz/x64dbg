@@ -1,25 +1,73 @@
 #include "HistoryLineEdit.h"
+#include "Bridge.h"
 
 HistoryLineEdit::HistoryLineEdit(QWidget* parent) : QLineEdit(parent)
 {
-    mCmdHistory.clear();
     mCmdIndex = -1;
     bSixPressed = false;
 }
 
+void HistoryLineEdit::loadSettings(QString sectionPrefix)
+{
+    char buffer[MAX_SETTING_SIZE];
+    for(int i = 1; BridgeSettingGet(sectionPrefix.toUtf8().constData(),
+                                    QString("Line%1").arg(i).toUtf8().constData(),
+                                    buffer) && buffer[0] && i < mCmdHistoryMaxSize; i++)
+    {
+        QString entry = QString(buffer);
+        mCmdHistory.append(entry);
+    }
+}
+
+void HistoryLineEdit::saveSettings(QString sectionPrefix)
+{
+    int i = 1;
+    for(i = 1; i <= mCmdHistory.size(); i++)
+    {
+        BridgeSettingSet(sectionPrefix.toUtf8().constData(),
+                         QString("Line%1").arg(i).toUtf8().constData(),
+                         mCmdHistory.at(i - 1).toUtf8().constData());
+    }
+
+    // Sentinel in case we saved less than is in the store currently
+    BridgeSettingSet(sectionPrefix.toUtf8().constData(),
+                     QString("Line%1").arg(i).toUtf8().constData(),
+                     "");
+}
+
 void HistoryLineEdit::addLineToHistory(QString parLine)
 {
-    mCmdHistory.prepend(parLine);
-
-    if(mCmdHistory.size() > 32)
+    if(mCmdHistory.size() > mCmdHistoryMaxSize)
         mCmdHistory.removeLast();
+
+    if(mCmdHistory.empty() || mCmdHistory.first() != parLine)
+        mCmdHistory.prepend(parLine);
 
     mCmdIndex = -1;
 }
 
+QString HistoryLineEdit::getLineFromHistory()
+{
+    if(mCmdHistory.empty())
+        return "";
+    else
+        return mCmdHistory.first();
+}
+
+QString HistoryLineEdit::addHistoryClear()
+{
+    auto str = text();
+    if(str.length())
+    {
+        addLineToHistory(str);
+        clear();
+    }
+    return str;
+}
+
 void HistoryLineEdit::keyPressEvent(QKeyEvent* event)
 {
-    int wKey = event->key();
+    int key = event->key();
 
     //This fixes a very annoying bug on some systems
     if(bSixPressed)
@@ -31,14 +79,14 @@ void HistoryLineEdit::keyPressEvent(QKeyEvent* event)
             return;
         }
     }
-    if(wKey == Qt::Key_6)
+    if(key == Qt::Key_6)
         bSixPressed = true;
 
-    if(wKey == Qt::Key_Up || wKey == Qt::Key_Down)
+    if(key == Qt::Key_Up || key == Qt::Key_Down)
     {
-        if(wKey == Qt::Key_Up)
+        if(key == Qt::Key_Up)
             mCmdIndex++;
-        else if(wKey == Qt::Key_Down)
+        else if(key == Qt::Key_Down)
             mCmdIndex--;
 
         mCmdIndex = mCmdIndex < -1 ? -1 : mCmdIndex;
@@ -53,6 +101,7 @@ void HistoryLineEdit::keyPressEvent(QKeyEvent* event)
         // NOTE: "Unlike textChanged(), this signal [textEdited()] is not emitted when
         // the text is changed programmatically, for example, by calling setText()."
         setText(newText);
+        emit textEdited(newText);
     }
 
     QLineEdit::keyPressEvent(event);

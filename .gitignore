@@ -1,70 +1,44 @@
-# Ignored directories
-bin/*/
-obj/
-ipch/
-Win32/
-x64/
-release/
-build/
-gui_build/
-debug/
-*XE Results*/
-doxygen*/
-doc/
-COV/
-minidump/
+# Output folders
+/bin/*/
+/bin/*.exe
+/bin/*.dll
+/bin/*.ini
+/bin/*.chm
+/bin/*.zip
+/bin/release-notes.md
+!/bin/themes/
+/src/**/x64/
+/src/**/Win32/
+/src/gui_build/
+/release/
 
-# Global filetypes to ignore
-*.depend
-*.layout
-*.patch
-*.cscope_file_list
-*.bmarks
-*.chw
-*.cbTemp
-*.ini
-*.opensdf
+# Folders
+.vs/
+.vscode/
+.idea/
+build*/
+cmake-build*/
+dist/
+
+# Extensions/files
 *.sdf
 *.suo
-*.autosave
-*.~vsd
-*.dll
-*.exe
-*.pro.user.*
-*.orig
-cov-int*
-*.pdb
-ui_*
+*.VC.db
+*.vcxproj.user
 *.aps
-*.pro.user
+*.pro.user*
+*.orig
+*.pdb
+*.ilk
 .DS_Store
-*.ipgset
-pin.log*
+Makefile
+Makefile.*
 
-# Project to ignore
-help/x64*dbg.chm
-help/output/
-bin/x64*dbg.chm
-bin/win32.*
+CMakeLists.txt.user
+/.cache
+CMakeUserPresets.json
 
-# Debugger files to ignore
-CppCheckResults.xml
-src/dbg/ODbgScript.chm
-src/dbg/ODbgScript.chw
-
-# GUI files
-src/gui/build
-src/gui/Makefile*
-tools/
-RCa*
-RDa*
-RDb*
-src/build-*/
-
-# Exceptions
-!/hooks/AStyleWhore.exe
-!/hooks/AStyle.dll
-!/bin/x64dbg_shell_remove.reg
-!*.lib
-pin.log
-src/gui/Translations/*.qm
+# Python
+__pycache__/
+*.pyc
+*.egg-info/

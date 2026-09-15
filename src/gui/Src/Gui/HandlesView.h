@@ -1,9 +1,15 @@
-#ifndef HANDLESVIEW_H
-#define HANDLESVIEW_H
+#pragma once
 
-#include "StdTable.h"
-#include <QVBoxLayout>
-#include <QSplitter>
+#include <QWidget>
+#include "Imports.h"
+
+class StdTable;
+class ReferenceView;
+class QVBoxLayout;
+class LabeledSplitter;
+class StdSearchListView;
+class StdIconSearchListView;
+class QMenu;
 
 class HandlesView : public QWidget
 {
@@ -16,8 +22,9 @@ public slots:
     void refreshShortcuts();
     void dbgStateChanged(DBGSTATE state);
 
-    void handlesTableContextMenuSlot(const QPoint & pos);
-    void tcpConnectionsTableContextMenuSlot(const QPoint & pos);
+    void handlesTableContextMenuSlot(QMenu* menu);
+    void tcpConnectionsTableContextMenuSlot(QMenu* menu);
+    void windowsTableContextMenuSlot(QMenu*);
     void privilegesTableContextMenuSlot(const QPoint & pos);
 
     void closeHandleSlot();
@@ -25,12 +32,21 @@ public slots:
     void enablePrivilegeSlot();
     void disableAllPrivilegesSlot();
     void enableAllPrivilegesSlot();
+    void enableWindowSlot();
+    void disableWindowSlot();
+    void focusWindowSlot();
+    void followInDisasmSlot();
+    void followInThreads();
+    void toggleBPSlot();
+    void messagesBPSlot();
 
 private:
     QVBoxLayout* mVertLayout;
-    QSplitter* mSplitter;
-    StdTable* mHandlesTable;
-    StdTable* mTcpConnectionsTable;
+    LabeledSplitter* mSplitter;
+    StdSearchListView* mHandlesTable;
+    StdSearchListView* mTcpConnectionsTable;
+    StdIconSearchListView* mWindowsTable;
+    //ReferenceView* mHeapsTable;
     StdTable* mPrivilegesTable;
 
     QAction* mActionRefresh;
@@ -39,12 +55,17 @@ private:
     QAction* mActionEnablePrivilege;
     QAction* mActionDisableAllPrivileges;
     QAction* mActionEnableAllPrivileges;
+    QAction* mActionEnableWindow;
+    QAction* mActionDisableWindow;
+    QAction* mActionFocusWindow;
+    QAction* mActionFollowProc;
+    QAction* mActionFollowThread;
+    QAction* mActionToggleProcBP;
+    QAction* mActionMessageProcBP;
 
     void enumHandles();
+    void enumWindows();
     void enumTcpConnections();
+    //void enumHeaps();
     void enumPrivileges();
-
-    void AppendPrivilege(int row, const char* PrivilegeString);
 };
-
-#endif // HANDLESVIEW_H

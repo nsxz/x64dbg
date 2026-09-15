@@ -1,56 +1,93 @@
-#ifndef MEMORYMAPVIEW_H
-#define MEMORYMAPVIEW_H
+#pragma once
 
-#include "StdTable.h"
+#include "StdIconTable.h"
 
-class MemoryMapView : public StdTable
+class GotoDialog;
+
+class MemoryMapView : public StdIconTable
 {
     Q_OBJECT
 public:
-    explicit MemoryMapView(StdTable* parent = 0);
-    QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h);
+    explicit MemoryMapView(StdTable* parent = nullptr);
+    QString paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h) override;
     void setupContextMenu();
 
 signals:
-    void showCpu();
     void showReferences();
 
 public slots:
+    void selectionChangedSlot(duint index);
+    void fixSelectionRangeSlot();
     void refreshShortcutsSlot();
     void stateChangedSlot(DBGSTATE state);
     void followDumpSlot();
     void followDisassemblerSlot();
-    void yaraSlot();
-    void memoryAccessSingleshootSlot();
-    void memoryAccessRestoreSlot();
-    void memoryWriteSingleshootSlot();
-    void memoryWriteRestoreSlot();
-    void memoryExecuteSingleshootSlot();
-    void memoryExecuteRestoreSlot();
-    void memoryRemoveSlot();
+    void followSymbolsSlot();
+    void doubleClickedSlot();
     void memoryExecuteSingleshootToggleSlot();
+    void memoryAllocateSlot();
+    void execCommandSlot();
     void contextMenuSlot(const QPoint & pos);
-    void switchView();
-    void pageMemoryRights();
-    void refreshMap();
-    void entropy();
+    void switchViewSlot();
+    void pageMemoryRightsSlot();
+    void refreshMapSlot();
     void findPatternSlot();
-    void dumpMemory();
+    void dumpMemorySlot();
+    void loadMemorySlot();
+    void commentSlot();
+    void selectAddressSlot(duint va);
+    void gotoOriginSlot();
+    void gotoExpressionSlot();
+    void addVirtualModSlot();
+    void findReferencesSlot();
+    void selectionGetSlot(SELECTIONDATA* selection);
+    void selectionSetSlot(const SELECTIONDATA* selection);
+    void disassembleAtSlot(duint va, duint cip);
 
 private:
-    QString getProtectionString(DWORD Protect);
+    void setSwitchViewName();
+
+    enum
+    {
+        ColAddress = 0,
+        ColSize,
+        ColParty,
+        ColPageInfo,
+        ColContent,
+        ColAllocation,
+        ColCurProtect,
+        ColAllocProtect
+    };
+
+    inline duint getSelectionAddr()
+    {
+        return getCellUserdata(getInitialSelection(), ColAddress);
+    }
+
+    inline QString getSelectionText()
+    {
+        return getCellContent(getInitialSelection(), ColAddress);
+    }
+
+    QAction* makeCommandAction(QAction* action, const QString & command);
+
+    GotoDialog* mGoto = nullptr;
 
     QAction* mFollowDump;
     QAction* mFollowDisassembly;
-    QAction* mYara;
+    QAction* mFollowSymbols;
     QAction* mSwitchView;
     QAction* mPageMemoryRights;
     QAction* mDumpMemory;
+    QAction* mLoadMemory;
 
     QMenu* mBreakpointMenu;
     QMenu* mMemoryAccessMenu;
     QAction* mMemoryAccessSingleshoot;
     QAction* mMemoryAccessRestore;
+    QMenu* mMemoryReadMenu;
+    QAction* mMemoryReadSingleshoot;
+    QAction* mMemoryReadRestore;
     QMenu* mMemoryWriteMenu;
     QAction* mMemoryWriteSingleshoot;
     QAction* mMemoryWriteRestore;
@@ -59,8 +96,20 @@ private:
     QAction* mMemoryExecuteRestore;
     QAction* mMemoryRemove;
     QAction* mMemoryExecuteSingleshootToggle;
-    QAction* mEntropy;
     QAction* mFindPattern;
-};
+    QMenu* mGotoMenu;
+    QAction* mGotoOrigin;
+    QAction* mGotoExpression;
+    QAction* mMemoryAllocate;
+    QAction* mMemoryFree;
+    QAction* mAddVirtualMod;
+    QAction* mComment;
+    QAction* mReferences;
+    QMenu* mPluginMenu;
 
-#endif // MEMORYMAPVIEW_H
+    duint mCipBase = 0;
+    duint mSelectionStart = 0;
+    duint mSelectionEnd = 0;
+    duint mSelectionCount = 0;
+    SortData mSelectionSort;
+};

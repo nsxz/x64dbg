@@ -1,33 +1,39 @@
-#ifndef MAINWINDOW_H
-#define MAINWINDOW_H
+#pragma once
 
 #include <QMainWindow>
-#include <QDragEnterEvent>
-#include <QComboBox>
-#include "CloseDialog.h"
-#include "CommandLineEdit.h"
-#include "TabWidget.h"
-#include "CPUWidget.h"
-#include "MemoryMapView.h"
-#include "CallStackView.h"
-#include "SEHChainView.h"
-#include "LogView.h"
-#include "SymbolView.h"
-#include "BreakpointsView.h"
-#include "ScriptView.h"
-#include "ReferenceManager.h"
-#include "ThreadView.h"
-#include "PatchDialog.h"
-#include "CalculatorDialog.h"
-#include "StatusLabel.h"
-#include "UpdateChecker.h"
-#include "SourceViewerManager.h"
-#include "SnowmanView.h"
-#include "HandlesView.h"
-#include "MainWindowCloseThread.h"
-#include "TimeWastedCounter.h"
-#include "NotesManager.h"
-#include "SettingsDialog.h"
+#include "Imports.h"
+
+class QMutex;
+class QDragEnterEvent;
+class QDropEvent;
+class QMutex;
+class CloseDialog;
+class CommandLineEdit;
+class MHTabWidget;
+class CPUWidget;
+class MemoryMapView;
+class CallStackView;
+class SEHChainView;
+class LogView;
+class SymbolView;
+class BreakpointsView;
+class ScriptView;
+class ReferenceManager;
+class ThreadView;
+class PatchDialog;
+class CalculatorDialog;
+class DebugStatusLabel;
+class LogStatusLabel;
+class SourceViewerManager;
+class HandlesView;
+class MainWindowCloseThread;
+class TimeWastedCounter;
+class NotesManager;
+class SettingsDialog;
+class SimpleTraceDialog;
+class MRUList;
+class UpdateChecker;
+class TraceManager;
 
 namespace Ui
 {
@@ -39,47 +45,50 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget* parent = 0);
+    explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
 
     void setupCommandBar();
     void setupStatusBar();
-    void closeEvent(QCloseEvent* event);
+    void closeEvent(QCloseEvent* event) override;
     void setTab(QWidget* widget);
     void loadTabDefaultOrder();
     void loadTabSavedOrder();
     void clearTabWidget();
 
+    static void loadSelectedTheme(bool reloadOnlyStyleCss = false);
+    static void updateDarkTitleBar(QWidget* widget);
+
 public slots:
+    void saveWindowSettings();
+    void loadWindowSettings();
     void executeCommand();
-    void execStepOver();
-    void execStepInto();
+    void execCommandSlot();
     void setFocusToCommandBar();
     void displayMemMapWidget();
     void displayLogWidget();
     void displayScriptWidget();
     void displayAboutWidget();
-    void execClose();
-    void execRun();
-    void execRtr();
-    void openFile();
-    void execPause();
-    void startScylla();
+    void execTocnd();
+    void execTicnd();
+    void animateIntoSlot();
+    void animateOverSlot();
+    void animateCommandSlot();
+    void openFileSlot();
+    void openRecentFileSlot(QString filename);
     void restartDebugging();
     void displayBreakpointWidget();
     void updateWindowTitleSlot(QString filename);
-    void execeStepOver();
-    void execeStepInto();
-    void execeRun();
-    void execeRtr();
-    void execSkip();
+    void runSlot();
+    void displayThreadsWidget();
     void displayCpuWidget();
+    void displayCpuWidgetShowCpu();
     void displaySymbolWidget();
     void displaySourceViewWidget();
     void displayReferencesWidget();
-    void displayThreadsWidget();
-    void displaySnowmanWidget();
-    void hideDebugger();
+    void displayVariables();
+    void displayGraphWidget();
+    void displayTraceWidget();
     void openSettings();
     void openAppearance();
     void openCalculator();
@@ -87,47 +96,63 @@ public slots:
     void setLastException(unsigned int exceptionCode);
     void findStrings();
     void findModularCalls();
-    void addMenuToList(QWidget* parent, QMenu* menu, int hMenu, int hParentMenu = -1);
+    void addMenuToList(QWidget* parent, QMenu* menu, GUIMENUTYPE hMenu, int hParentMenu = -1);
     void addMenu(int hMenu, QString title);
     void addMenuEntry(int hMenu, QString title);
     void addSeparator(int hMenu);
-    void clearMenu(int hMenu);
+    void clearMenu(int hMenu, bool erase);
     void menuEntrySlot();
-    void removeMenuEntry(int hEntry);
+    void removeMenuEntry(int hEntryMenu);
     void setIconMenuEntry(int hEntry, QIcon icon);
     void setIconMenu(int hMenu, QIcon icon);
+    void setCheckedMenuEntry(int hEntry, bool checked);
+    void setHotkeyMenuEntry(int hEntry, QString hotkey, QString id);
+    void setVisibleMenuEntry(int hEntry, bool visible);
+    void setVisibleMenu(int hMenu, bool visible);
+    void setNameMenuEntry(int hEntry, QString name);
+    void setNameMenu(int hMenu, QString name);
     void runSelection();
+    void runExpression();
     void getStrWindow(const QString title, QString* text);
     void patchWindow();
     void displayComments();
     void displayLabels();
     void displayBookmarks();
     void displayFunctions();
-    void checkUpdates();
+    void crashDump();
     void displayCallstack();
     void displaySEHChain();
     void setGlobalShortcut(QAction* action, const QKeySequence & key);
     void refreshShortcuts();
     void openShortcuts();
     void changeTopmost(bool checked);
+    void mnemonicHelp();
     void donate();
+    void blog();
     void reportBug();
     void displayAttach();
-    void detach();
     void changeCommandLine();
     void displayManual();
-    void decompileAt(dsint start, dsint end);
     void canClose();
     void addQWidgetTab(QWidget* qWidget, QString nativeName);
     void addQWidgetTab(QWidget* qWidget);
     void showQWidgetTab(QWidget* qWidget);
     void closeQWidgetTab(QWidget* qWidget);
-    void executeOnGuiThread(void* cbGuiThread);
+    void executeOnGuiThread(void* cbGuiThread, void* userdata);
     void tabMovedSlot(int from, int to);
     void chkSaveloadTabSavedOrderStateChangedSlot(bool state);
     void dbgStateChangedSlot(DBGSTATE state);
     void displayNotesWidget();
     void displayHandlesWidget();
+    void manageFavourites();
+    void updateFavouriteTools();
+    void clickFavouriteTool();
+    void chooseLanguage();
+    void setInitializationScript();
+    void customizeMenu();
+    void addFavouriteItem(int type, const QString & name, const QString & description);
+    void setFavouriteItemShortcut(int type, const QString & name, const QString & shortcut);
+    void themeTriggeredSlot();
 
 private:
     Ui::MainWindow* ui;
@@ -147,77 +172,125 @@ private:
     ThreadView* mThreadView;
     PatchDialog* mPatchDialog;
     CalculatorDialog* mCalculatorDialog;
-    SnowmanView* mSnowmanView;
     HandlesView* mHandlesView;
     NotesManager* mNotesManager;
-
-    StatusLabel* mStatusLabel;
-    StatusLabel* mLastLogLabel;
-
+    TraceManager* mTraceWidget;
+    SimpleTraceDialog* mSimpleTraceDialog;
     UpdateChecker* mUpdateChecker;
+    DebugStatusLabel* mStatusLabel;
+    LogStatusLabel* mLastLogLabel;
+    QToolBar* mFavouriteToolbar;
+
     TimeWastedCounter* mTimeWastedCounter;
 
     QString mWindowMainTitle;
 
-    QStringList mMRUList;
-    int mMaxMRU;
+    MRUList* mMRUList;
     unsigned int lastException;
 
-    void loadMRUList(int maxItems);
-    void saveMRUList();
-    void addMRUEntry(QString entry);
-    void removeMRUEntry(QString entry);
+    QAction* actionManageFavourites;
+
     void updateMRUMenu();
-    QString getMRUEntry(int index);
+    void setupLanguagesMenu();
+    void setupThemesMenu();
+    void onMenuCustomized();
+    void setupMenuCustomization();
+    QAction* makeCommandAction(QAction* action, const QString & command);
+    void showReleaseNotes(duint cutoffEpoch);
+
+    //lists for menu customization
+    QList<QAction*> mFileMenuStrings;
+    QList<QAction*> mViewMenuStrings;
+    QList<QAction*> mDebugMenuStrings;
+    //"Plugins" menu cannot be customized for item hiding.
+    //"Favourites" menu cannot be customized for item hiding.
+    QList<QAction*> mOptionsMenuStrings;
+    QList<QAction*> mHelpMenuStrings;
 
     //menu api
     struct MenuEntryInfo
     {
-        QAction* mAction;
-        int hEntry;
-        int hParentMenu;
+        MenuEntryInfo() = default;
+
+        QAction* mAction = nullptr;
+        int hEntry = -1;
+        int hParentMenu = -1;
+        QString hotkey;
+        QString hotkeyId;
+        bool hotkeyGlobal = false;
+        bool deleted = false;
     };
 
     struct MenuInfo
     {
     public:
-        MenuInfo(QWidget* parent, QMenu* mMenu, int hMenu, int hParentMenu)
+        MenuInfo(QWidget* parent, QMenu* mMenu, int hMenu, int hParentMenu, bool globalMenu)
+            : parent(parent), mMenu(mMenu), hMenu(hMenu), hParentMenu(hParentMenu), globalMenu(globalMenu)
         {
-            this->parent = parent;
-            this->mMenu = mMenu;
-            this->hMenu = hMenu;
-            this->hParentMenu = hParentMenu;
         }
 
-        QWidget* parent;
-        QMenu* mMenu;
-        int hMenu;
-        int hParentMenu;
+        MenuInfo() = default;
+
+        QWidget* parent = nullptr;
+        QMenu* mMenu = nullptr;
+        int hMenu = -1;
+        int hParentMenu = -1;
+        bool globalMenu = false;
+        bool deleted = false;
     };
 
+    QMutex* mMenuMutex = nullptr;
+    int hEntryMenuPool;
     QList<MenuEntryInfo> mEntryList;
-    int hEntryNext;
     QList<MenuInfo> mMenuList;
-    int hMenuNext;
 
     void initMenuApi();
-    const MenuInfo* findMenu(int hMenu);
+    MenuInfo* findMenu(int hMenu);
+    MenuEntryInfo* findMenuEntry(int hEntry);
+    QString nestedMenuDescription(const MenuInfo* menu);
+    QString nestedMenuEntryDescription(const MenuEntryInfo & entry);
+    void clearMenuHelper(int hMenu, bool markAsDeleted);
+    void clearMenuImpl(int hMenu, bool erase);
 
     bool bCanClose;
+    bool bExitWhenDetached;
     MainWindowCloseThread* mCloseThread;
-    QVector<QWidget*> mWidgetList;
-    QVector<QString> mWidgetNativeNameList;
+
+    struct WidgetInfo
+    {
+    public:
+        WidgetInfo(QWidget* widget, QString nativeName)
+        {
+            this->widget = widget;
+            this->nativeName = nativeName;
+        }
+
+        QWidget* widget;
+        QString nativeName;
+    };
+
+    QList<WidgetInfo> mWidgetList;
+    QList<WidgetInfo> mPluginWidgetList;
 
 protected:
-    void dragEnterEvent(QDragEnterEvent* pEvent);
-    void dropEvent(QDropEvent* pEvent);
-
-public:
-    static QString windowTitle;
+    void dragEnterEvent(QDragEnterEvent* pEvent) override;
+    void dropEvent(QDropEvent* pEvent) override;
+    bool event(QEvent* event) override;
+    bool nativeEvent(const QByteArray & eventType, void* message, long* result) override;
 
 private slots:
+    void setupLanguagesMenu2();
+    void updateStyle();
+    void updateFont();
+
     void on_actionFaq_triggered();
     void on_actionReloadStylesheet_triggered();
+    void on_actionImportSettings_triggered();
+    void on_actionImportdatabase_triggered();
+    void on_actionExportdatabase_triggered();
+    void on_actionPlugins_triggered();
+    void on_actionCheckUpdates_triggered();
+    void on_actionDefaultTheme_triggered();
+    void on_actionAbout_Qt_triggered();
+    void on_actionReleaseNotes_triggered();
 };
-
-#endif // MAINWINDOW_H

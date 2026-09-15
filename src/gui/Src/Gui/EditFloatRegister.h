@@ -1,9 +1,8 @@
-#ifndef EDITFLOATREGISTER_H
-#define EDITFLOATREGISTER_H
+#pragma once
 
 #include <QDialog>
 #include <QLineEdit>
-#include <HexValidator.h>
+#include "HexValidator.h"
 #include "LongLongValidator.h"
 #include <QDoubleValidator>
 
@@ -17,9 +16,9 @@ class EditFloatRegister : public QDialog
     Q_OBJECT
 
 public:
-    explicit EditFloatRegister(int RegisterSize, QWidget* parent = 0);
-    void loadData(char* RegisterData);
-    const char* getData();
+    explicit EditFloatRegister(int RegisterSize, QWidget* parent = nullptr);
+    void loadData(const char* RegisterData);
+    const char* getData() const;
     void selectAllText();
 
     ~EditFloatRegister();
@@ -70,6 +69,8 @@ private slots:
     void editingUpperLongLong0FinishedSlot(QString arg);
     void editingUpperLongLong1FinishedSlot(QString arg);
 
+    void AVX512ScrollbarScrolled(int value);
+
 private:
     HexValidator hexValidate;
     LongLongValidator signedShortValidator;
@@ -81,6 +82,7 @@ private:
     QDoubleValidator doubleValidator;
 
     void hideUpperPart();
+    void hideNonMMXPart();
 
     void reloadDataLow();
     void reloadDataHigh();
@@ -98,9 +100,9 @@ private:
     void editingLongLongFinishedSlot(size_t offset, QString arg);
 
     Ui::EditFloatRegister* ui;
-    QObject* mutex;
-    char Data[64];
+    QObject* mutex = nullptr;
+    // The compiler could use MOVAPS instruction to copy this data so it needs to be aligned.
+    __declspec(align(32)) char Data[64];
     int RegSize;
+    int AVX512EditUpper;
 };
-
-#endif // EDITFLOATREGISTER_H

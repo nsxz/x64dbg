@@ -1,18 +1,17 @@
-#ifndef _THREADING_H
-#define _THREADING_H
+#pragma once
 
 #include "_global.h"
 
 enum WAIT_ID
 {
     WAITID_RUN,
-    WAITID_STOP,
     WAITID_LAST
 };
 
 //functions
 void waitclear();
 void wait(WAIT_ID id);
+bool waitfor(WAIT_ID id, unsigned int Milliseconds);
 void lock(WAIT_ID id);
 void unlock(WAIT_ID id);
 bool waitislocked(WAIT_ID id);
@@ -25,13 +24,15 @@ void waitdeinitialize();
 // Win Vista and newer: (Faster) SRW locks used
 // Win 2003 and older:  (Slower) Critical sections used
 //
-#define EXCLUSIVE_ACQUIRE(Index)    SectionLocker<Index, false> __ThreadLock
-#define EXCLUSIVE_REACQUIRE()       __ThreadLock.Lock()
-#define EXCLUSIVE_RELEASE()         __ThreadLock.Unlock()
+#define EXCLUSIVE_ACQUIRE(Index)     SectionLocker<Index, false> __ThreadLock
+#define EXCLUSIVE_ACQUIRE_GUI(Index) SectionLocker<Index, false, true> __ThreadLock
+#define EXCLUSIVE_REACQUIRE()        __ThreadLock.Lock()
+#define EXCLUSIVE_RELEASE()          __ThreadLock.Unlock()
 
-#define SHARED_ACQUIRE(Index)       SectionLocker<Index, true> __SThreadLock
-#define SHARED_REACQUIRE()          __SThreadLock.Lock()
-#define SHARED_RELEASE()            __SThreadLock.Unlock()
+#define SHARED_ACQUIRE(Index)        SectionLocker<Index, true> __SThreadLock
+#define SHARED_ACQUIRE_GUI(Index)    SectionLocker<Index, true, true> __SThreadLock
+#define SHARED_REACQUIRE()           __SThreadLock.Lock()
+#define SHARED_RELEASE()             __SThreadLock.Unlock()
 
 enum SectionLock
 {
@@ -53,21 +54,46 @@ enum SectionLock
     LockPluginCallbackList,
     LockPluginCommandList,
     LockPluginMenuList,
+    LockPluginExprfunctionList,
+    LockPluginFormatfunctionList,
     LockSehCache,
     LockMnemonicHelp,
     LockTraceRecord,
     LockCrossReferences,
     LockDebugStartStop,
     LockArguments,
+    LockEncodeMaps,
+    LockCallstackCache,
+    LockRunToUserCode,
+    LockWatch,
+    LockExpressionFunctions,
+    LockHistory,
+    LockSymbolCache,
+    LockLineCache,
+    LockTypeManager,
+    LockModuleHashes,
+    LockFormatFunctions,
+    LockDllBreakpoints,
+    LockHandleCache,
+    LockScriptLineMap,
+    LockScriptBreakpoints,
+    LockAddressColors,
 
-    // Number of elements in this enumeration. Must always be the last
-    // index.
+    // Number of elements in this enumeration. Must always be the last index.
     LockLast
+};
+
+template<typename T>
+struct DBG_ALIGNAS(64) CacheAligned
+{
+    T value;
+
+    T* operator&() { return &value; }
 };
 
 class SectionLockerGlobal
 {
-    template<SectionLock LockIndex, bool Shared>
+    template<SectionLock LockIndex, bool Shared, bool ProcessGuiEvents>
     friend class SectionLocker;
 
 public:
@@ -75,46 +101,85 @@ public:
     static void Deinitialize();
 
 private:
-    static inline void AcquireLock(SectionLock LockIndex, bool Shared)
+    template<SectionLock LockIndex, bool Shared, bool ProcessGuiEvents>
+    static void AcquireLock()
     {
-        if(m_SRWLocks)
+        auto threadId = GetCurrentThreadId();
+
+        auto srwLock = &m_srwLocks[LockIndex];
+
+        if(Shared)
         {
-            if(Shared)
-                m_AcquireSRWLockShared(&m_srwLocks[LockIndex]);
+            if(m_exclusiveOwner[LockIndex].threadId == threadId)
+                return;
+
+            if(ProcessGuiEvents && threadId == m_guiMainThreadId)
+            {
+                while(!TryAcquireSRWLockShared(srwLock))
+                    GuiProcessEvents();
+            }
             else
-                m_AcquireSRWLockExclusive(&m_srwLocks[LockIndex]);
+            {
+                AcquireSRWLockShared(srwLock);
+            }
+            return;
+        }
+
+        if(m_exclusiveOwner[LockIndex].threadId == threadId)
+        {
+            assert(m_exclusiveOwner[LockIndex].count > 0);
+            m_exclusiveOwner[LockIndex].count++;
+            return;
+        }
+
+        if(ProcessGuiEvents && threadId == m_guiMainThreadId)
+        {
+            while(!TryAcquireSRWLockExclusive(srwLock))
+                GuiProcessEvents();
         }
         else
-            EnterCriticalSection(&m_crLocks[LockIndex]);
-    }
-
-    static inline void ReleaseLock(SectionLock LockIndex, bool Shared)
-    {
-        if(m_SRWLocks)
         {
-            if(Shared)
-                m_ReleaseSRWLockShared(&m_srwLocks[LockIndex]);
-            else
-                m_ReleaseSRWLockExclusive(&m_srwLocks[LockIndex]);
+            AcquireSRWLockExclusive(srwLock);
         }
-        else
-            LeaveCriticalSection(&m_crLocks[LockIndex]);
+
+        assert(m_exclusiveOwner[LockIndex].threadId == 0);
+        assert(m_exclusiveOwner[LockIndex].count == 0);
+        m_exclusiveOwner[LockIndex].threadId = threadId;
+        m_exclusiveOwner[LockIndex].count = 1;
     }
 
-    typedef void (WINAPI* SRWLOCKFUNCTION)(PSRWLOCK SWRLock);
+    template<SectionLock LockIndex, bool Shared>
+    static void ReleaseLock()
+    {
+        if(Shared)
+        {
+            if(m_exclusiveOwner[LockIndex].threadId == GetCurrentThreadId())
+                return;
+
+            ReleaseSRWLockShared(&m_srwLocks[LockIndex]);
+            return;
+        }
+
+        assert(m_exclusiveOwner[LockIndex].count && m_exclusiveOwner[LockIndex].threadId);
+        m_exclusiveOwner[LockIndex].count--;
+
+        if(m_exclusiveOwner[LockIndex].count == 0)
+        {
+            m_exclusiveOwner[LockIndex].threadId = 0;
+            ReleaseSRWLockExclusive(&m_srwLocks[LockIndex]);
+        }
+    }
 
     static bool m_Initialized;
-    static bool m_SRWLocks;
-    static SRWLOCK m_srwLocks[SectionLock::LockLast];
-    static CRITICAL_SECTION m_crLocks[SectionLock::LockLast];
-    static SRWLOCKFUNCTION m_InitializeSRWLock;
-    static SRWLOCKFUNCTION m_AcquireSRWLockShared;
-    static SRWLOCKFUNCTION m_AcquireSRWLockExclusive;
-    static SRWLOCKFUNCTION m_ReleaseSRWLockShared;
-    static SRWLOCKFUNCTION m_ReleaseSRWLockExclusive;
+
+    struct DBG_ALIGNAS(64) owner_info { DWORD threadId; size_t count; };
+    static owner_info m_exclusiveOwner[SectionLock::LockLast];
+    static CacheAligned<SRWLOCK> m_srwLocks[SectionLock::LockLast];
+    static CacheAligned<CRITICAL_SECTION> m_crLocks[SectionLock::LockLast];
+    static DWORD m_guiMainThreadId;
 };
 
-template<SectionLock LockIndex, bool Shared>
+template<SectionLock LockIndex, bool Shared, bool ProcessGuiEvents = false>
 class SectionLocker
 {
 public:
@@ -129,25 +194,28 @@ public:
         if(m_LockCount > 0)
             Unlock();
 
-#ifdef _DEBUG
-        // Assert that the lock count is zero on destructor
-        if(m_LockCount > 0)
-            __debugbreak();
-#endif
+        // The lock count should be zero after destruction.
+        assert(m_LockCount == 0);
     }
 
     inline void Lock()
     {
-        Internal::AcquireLock(LockIndex, Shared);
+        Internal::AcquireLock<LockIndex, Shared, ProcessGuiEvents>();
+
+        // We cannot recursively lock more than 255 times.
+        assert(m_LockCount < 255);
 
         m_LockCount++;
     }
 
     inline void Unlock()
     {
+        // Unlocking twice will cause undefined behaviour.
+        assert(m_LockCount != 0);
+
         m_LockCount--;
 
-        Internal::ReleaseLock(LockIndex, Shared);
+        Internal::ReleaseLock<LockIndex, Shared>();
     }
 
 protected:
@@ -157,4 +225,20 @@ private:
     using Internal = SectionLockerGlobal;
 };
 
-#endif // _THREADING_H
+template <SectionLock LockIndex, bool ProcessGuiEvents = false>
+using SharedSectionLocker = SectionLocker<LockIndex, true, ProcessGuiEvents>;
+
+template <SectionLock LockIndex, bool ProcessGuiEvents = false>
+using ExclusiveSectionLocker = SectionLocker<LockIndex, false, ProcessGuiEvents>;
+
+struct TLSData
+{
+    String moduleHashLower;
+
+    TLSData();
+    TLSData(const TLSData &) = delete;
+    TLSData & operator=(const TLSData &) = delete;
+
+    static bool notify(DWORD fdwReason);
+    static TLSData* get();
+};

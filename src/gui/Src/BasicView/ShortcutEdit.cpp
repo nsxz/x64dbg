@@ -1,8 +1,10 @@
 #include "ShortcutEdit.h"
+#include <QStyle>
 
 ShortcutEdit::ShortcutEdit(QWidget* parent) : QLineEdit(parent)
 {
     keyInt = -1;
+    mError = true;
 }
 
 const QKeySequence ShortcutEdit::getKeysequence() const
@@ -13,12 +15,17 @@ const QKeySequence ShortcutEdit::getKeysequence() const
     return QKeySequence(keyInt);
 }
 
+bool ShortcutEdit::error() const
+{
+    return mError;
+}
+
 void ShortcutEdit::setErrorState(bool error)
 {
-    if(error)
-        setStyleSheet("color: #DD0000");
-    else
-        setStyleSheet("color: #222222");
+    this->mError = error;
+
+    this->style()->unpolish(this);
+    this->style()->polish(this);
 }
 
 void ShortcutEdit::keyPressEvent(QKeyEvent* event)
@@ -35,18 +42,23 @@ void ShortcutEdit::keyPressEvent(QKeyEvent* event)
         return;
     }
 
-    // these keys will be ignored
-    if(key == Qt::Key_Escape || key == Qt::Key_Backspace)
-    {
-        setText("");
-        keyInt = -1;
-        emit askForSave();
-        return;
-    }
+    // Workaround for Shift+Tab
+    if(keyInt == Qt::Key_Backtab)
+        keyInt = Qt::Key_Tab;
 
     // any combination of "Ctrl, Alt, Shift" ?
     Qt::KeyboardModifiers modifiers = event->modifiers();
-    if(modifiers.testFlag(Qt::ShiftModifier))
+    QString text = event->text();
+    // The shift modifier only counts when it is not used to type a symbol
+    // that is only reachable using the shift key anyway
+    // Fix from: https://bbs.pediy.com/thread-270394.htm
+    if(modifiers.testFlag(Qt::ShiftModifier) && (text.isEmpty() ||
+            !text.at(0).isPrint() ||
+            text.at(0).isLetterOrNumber() ||
+            text.at(0).isSpace()) &&
+            (!((keyInt >= Qt::Key_Exclam) && (keyInt <= Qt::Key_Slash)) ||
+             ((keyInt >= Qt::Key_Colon) && (keyInt <= Qt::Key_At)) ||
+             ((keyInt >= Qt::Key_BracketLeft) && (keyInt <= Qt::Key_QuoteLeft))))
         keyInt += Qt::SHIFT;
     if(modifiers.testFlag(Qt::ControlModifier))
         keyInt += Qt::CTRL;
@@ -54,7 +66,7 @@ void ShortcutEdit::keyPressEvent(QKeyEvent* event)
         keyInt += Qt::ALT;
 
     // some strange cases (only Ctrl)
-    QString KeyText = QKeySequence(keyInt).toString(QKeySequence::NativeText) ;
+    QString KeyText = QKeySequence(keyInt).toString(QKeySequence::NativeText);
     for(int i = 0; i < KeyText.length(); i++)
     {
         if(KeyText[i].toLatin1() == 0)
@@ -65,7 +77,6 @@ void ShortcutEdit::keyPressEvent(QKeyEvent* event)
             return;
         }
     }
-
 
     // display key combination
     setText(QKeySequence(keyInt).toString(QKeySequence::NativeText));
